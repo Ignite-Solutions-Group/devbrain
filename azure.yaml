@@ -1,0 +1,6 @@
+name: devbrain
+services:
+  api:
+    project: src/DevBrain.Functions
+    language: dotnet
+    host: function

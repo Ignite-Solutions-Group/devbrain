@@ -1,0 +1,10 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "CosmosDb__AccountEndpoint": "https://your-cosmos-account.documents.azure.com:443/",
+    "CosmosDb__DatabaseName": "devbrain",
+    "CosmosDb__ContainerName": "documents"
+  }
+}
