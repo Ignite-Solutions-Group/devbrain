@@ -24,6 +24,19 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   }
 }
 
+resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
+  parent: storageAccount
+  name: 'default'
+}
+
+resource deploymentContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: blobService
+  name: 'deploymentpackage'
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
 // ─── Cosmos DB ───────────────────────────────────────────────────────────────
 
 resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
@@ -124,7 +137,6 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
         { name: 'AzureWebJobsStorage__accountName', value: storageAccount.name }
         { name: 'AzureWebJobsStorage__credential', value: 'managedidentity' }
         { name: 'FUNCTIONS_EXTENSION_VERSION', value: '~4' }
-        { name: 'FUNCTIONS_WORKER_RUNTIME', value: 'dotnet-isolated' }
         { name: 'CosmosDb__AccountEndpoint', value: cosmosAccount.properties.documentEndpoint }
         { name: 'CosmosDb__DatabaseName', value: 'devbrain' }
         { name: 'CosmosDb__ContainerName', value: 'documents' }
