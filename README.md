@@ -39,20 +39,21 @@ DevBrain eliminates this. Deploy once, point any MCP client at the endpoint, and
 
 ### 1. Register the Entra app
 
-```bash
+```powershell
 # Create the app registration
 az ad app create --display-name "DevBrain" --sign-in-audience AzureADMyOrg
 
 # Note the appId from the output — you'll need it below
 # Expose an API scope
-az ad app update --id <APP_ID> \
-  --identifier-uris "api://<APP_ID>" \
-  --set "api.oauth2PermissionScopes=[{\"id\":\"$(uuidgen)\",\"adminConsentDescription\":\"Read and write documents\",\"adminConsentDisplayName\":\"documents.readwrite\",\"isEnabled\":true,\"type\":\"User\",\"value\":\"documents.readwrite\"}]"
+$scopeId = [guid]::NewGuid().ToString()
+az ad app update --id <APP_ID> `
+  --identifier-uris "api://<APP_ID>" `
+  --set "api.oauth2PermissionScopes=[{\`"id\`":\`"$scopeId\`",\`"adminConsentDescription\`":\`"Read and write documents\`",\`"adminConsentDisplayName\`":\`"documents.readwrite\`",\`"isEnabled\`":true,\`"type\`":\`"User\`",\`"value\`":\`"documents.readwrite\`"}]"
 ```
 
 ### 2. Deploy with azd
 
-```bash
+```powershell
 azd init -t Ignite-Solutions-Group/devbrain
 azd env set ENTRA_CLIENT_ID <APP_ID>
 azd up
@@ -60,9 +61,9 @@ azd up
 
 ### 3. Update the app registration redirect URI
 
-```bash
+```powershell
 # Get the function URL from azd output
-az ad app update --id <APP_ID> \
+az ad app update --id <APP_ID> `
   --web-redirect-uris "https://<FUNCTION_URL>/.auth/login/aad/callback"
 ```
 
@@ -133,18 +134,18 @@ Documents are organized by key prefix. These conventions are recommended but not
 1. Install prerequisites: .NET 10 SDK, [Azure Functions Core Tools v4](https://learn.microsoft.com/azure/azure-functions/functions-run-local), Azure CLI.
 
 2. Log in to Azure (for Cosmos access via `DefaultAzureCredential`):
-   ```bash
+   ```powershell
    az login
    ```
 
 3. Copy and configure local settings:
-   ```bash
-   cp src/DevBrain.Functions/local.settings.json.example src/DevBrain.Functions/local.settings.json
+   ```powershell
+   Copy-Item src/DevBrain.Functions/local.settings.json.example src/DevBrain.Functions/local.settings.json
    # Edit with your Cosmos DB account endpoint
    ```
 
 4. Run:
-   ```bash
+   ```powershell
    cd src/DevBrain.Functions
    func start
    ```
