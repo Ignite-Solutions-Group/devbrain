@@ -70,6 +70,21 @@ resource cosmosContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/con
   }
 }
 
+// ─── Flex Consumption App Service Plan ───────────────────────────────────────
+
+resource appServicePlan 'Microsoft.Web/serverfarms@2024-04-01' = {
+  name: 'plan-devbrain-${resourceToken}'
+  location: location
+  kind: 'functionapp'
+  sku: {
+    name: 'FC1'
+    tier: 'FlexConsumption'
+  }
+  properties: {
+    reserved: true
+  }
+}
+
 // ─── Function App (Flex Consumption) ─────────────────────────────────────────
 
 resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
@@ -83,11 +98,31 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
     type: 'SystemAssigned'
   }
   properties: {
+    serverFarmId: appServicePlan.id
     reserved: true
+    functionAppConfig: {
+      deployment: {
+        storage: {
+          type: 'blobContainer'
+          value: '${storageAccount.properties.primaryEndpoints.blob}deploymentpackage'
+          authentication: {
+            type: 'SystemAssignedIdentity'
+          }
+        }
+      }
+      runtime: {
+        name: 'dotnet-isolated'
+        version: '10.0'
+      }
+      scaleAndConcurrency: {
+        maximumInstanceCount: 10
+        instanceMemoryMB: 2048
+      }
+    }
     siteConfig: {
-      linuxFxVersion: 'DOTNET-ISOLATED|10.0'
       appSettings: [
-        { name: 'AzureWebJobsStorage', value: 'DefaultEndpointsProtocol=https;AccountName=${storageAccount.name};EndpointSuffix=${environment().suffixes.storage};AccountKey=${storageAccount.listKeys().keys[0].value}' }
+        { name: 'AzureWebJobsStorage__accountName', value: storageAccount.name }
+        { name: 'AzureWebJobsStorage__credential', value: 'managedidentity' }
         { name: 'FUNCTIONS_EXTENSION_VERSION', value: '~4' }
         { name: 'FUNCTIONS_WORKER_RUNTIME', value: 'dotnet-isolated' }
         { name: 'CosmosDb__AccountEndpoint', value: cosmosAccount.properties.documentEndpoint }
@@ -95,6 +130,18 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
         { name: 'CosmosDb__ContainerName', value: 'documents' }
       ]
     }
+  }
+}
+
+// ─── Storage Blob Data Owner (for Flex Consumption managed identity) ────────
+
+resource storageBlobDataOwnerRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storageAccount.id, functionApp.id, 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
+  scope: storageAccount
+  properties: {
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
   }
 }
 
