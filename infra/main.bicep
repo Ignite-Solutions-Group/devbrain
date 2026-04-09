@@ -12,7 +12,7 @@ var resourceToken = toLower(uniqueString(subscription().id, environmentName, loc
 // ─── Storage Account (required by Azure Functions) ───────────────────────────
 
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
-  name: 'st${resourceToken}'
+  name: 'sadevbrain${substring(resourceToken, 0, 6)}'
   location: location
   kind: 'StorageV2'
   sku: {
@@ -27,12 +27,12 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
 // ─── Cosmos DB ───────────────────────────────────────────────────────────────
 
 resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
-  name: 'cosmos-${resourceToken}'
+  name: 'cosmos-devbrain-${resourceToken}'
   location: location
   kind: 'GlobalDocumentDB'
   properties: {
     databaseAccountOfferType: 'Standard'
-    enableFreeTier: true
+    enableFreeTier: false
     consistencyPolicy: {
       defaultConsistencyLevel: 'Session'
     }
@@ -73,7 +73,7 @@ resource cosmosContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/con
 // ─── Function App (Flex Consumption) ─────────────────────────────────────────
 
 resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
-  name: 'func-${resourceToken}'
+  name: 'func-devbrain-${resourceToken}'
   location: location
   kind: 'functionapp,linux'
   identity: {
