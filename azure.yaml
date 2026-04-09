@@ -2,7 +2,10 @@ name: devbrain
 hooks:
   postprovision:
     shell: pwsh
-    run: Start-Sleep -Seconds 30
+    run: |
+      Write-Host "Waiting 30 seconds for Function App to warm up..."
+      Start-Sleep -Seconds 30
+      Write-Host "Done. Starting deployment."
 services:
   api:
     project: src/DevBrain.Functions
