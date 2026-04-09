@@ -1,0 +1,7 @@
+{
+  "cosmosDBAccount": "cosmos",
+  "functionApp": "func",
+  "managedIdentity": "id",
+  "resourceGroup": "rg",
+  "storageAccount": "st"
+}

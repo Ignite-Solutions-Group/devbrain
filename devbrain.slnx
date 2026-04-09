@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DevBrain.Functions/DevBrain.Functions.csproj" />
+  </Folder>
+</Solution>
