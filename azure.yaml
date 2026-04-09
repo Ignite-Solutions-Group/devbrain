@@ -1,4 +1,8 @@
 name: devbrain
+hooks:
+  postprovision:
+    shell: pwsh
+    run: Start-Sleep -Seconds 30
 services:
   api:
     project: src/DevBrain.Functions

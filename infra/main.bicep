@@ -76,6 +76,9 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
   name: 'func-devbrain-${resourceToken}'
   location: location
   kind: 'functionapp,linux'
+  tags: {
+    'azd-service-name': 'api'
+  }
   identity: {
     type: 'SystemAssigned'
   }
