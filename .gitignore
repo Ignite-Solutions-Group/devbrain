@@ -36,8 +36,10 @@ local.settings.json
 .DS_Store
 Thumbs.db
 
-# Local operational tools (not shipped)
-tools/
+# Local operational tools (not shipped) — anchored to repo root so it
+# doesn't collide with src/**/Tools/ source folders (case-insensitive
+# match on Windows).
+/tools/
 
 #Claude folder
 .claude/
