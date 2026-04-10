@@ -80,6 +80,29 @@ resource cosmosContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/con
   }
 }
 
+// ─── Log Analytics + Application Insights ───────────────────────────────────
+
+resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
+  name: 'log-devbrain-${resourceToken}'
+  location: location
+  properties: {
+    sku: {
+      name: 'PerGB2018'
+    }
+    retentionInDays: 30
+  }
+}
+
+resource applicationInsights 'Microsoft.Insights/components@2020-02-02' = {
+  name: 'appi-devbrain-${resourceToken}'
+  location: location
+  kind: 'web'
+  properties: {
+    Application_Type: 'web'
+    WorkspaceResourceId: logAnalyticsWorkspace.id
+  }
+}
+
 // ─── Flex Consumption App Service Plan ───────────────────────────────────────
 
 resource appServicePlan 'Microsoft.Web/serverfarms@2024-04-01' = {
@@ -137,6 +160,7 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
         { name: 'CosmosDb__AccountEndpoint', value: cosmosAccount.properties.documentEndpoint }
         { name: 'CosmosDb__DatabaseName', value: 'devbrain' }
         { name: 'CosmosDb__ContainerName', value: 'documents' }
+        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: applicationInsights.properties.ConnectionString }
       ]
     }
   }
@@ -151,6 +175,42 @@ resource storageBlobDataOwnerRole 'Microsoft.Authorization/roleAssignments@2022-
     principalId: functionApp.identity.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
+  }
+}
+
+// ─── Storage Queue Data Contributor (for Flex Consumption managed identity) ─
+
+resource storageQueueDataContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storageAccount.id, functionApp.id, '974c5e8b-45b9-4653-ba55-5f855dd0fb88')
+  scope: storageAccount
+  properties: {
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '974c5e8b-45b9-4653-ba55-5f855dd0fb88')
+  }
+}
+
+// ─── Storage Queue Data Message Processor (for Flex Consumption managed identity) ─
+
+resource storageQueueDataMessageProcessorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storageAccount.id, functionApp.id, '8a0f0c08-91a1-4084-bc3d-661d67233fed')
+  scope: storageAccount
+  properties: {
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '8a0f0c08-91a1-4084-bc3d-661d67233fed')
+  }
+}
+
+// ─── Monitoring Metrics Publisher (for Function App → App Insights) ────────
+
+resource monitoringMetricsPublisherRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(applicationInsights.id, functionApp.id, '3913510d-42f4-52ac-2049-1a32870e3ca1')
+  scope: applicationInsights
+  properties: {
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3913510d-42f4-52ac-2049-1a32870e3ca1')
   }
 }
 
