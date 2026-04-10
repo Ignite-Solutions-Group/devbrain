@@ -38,3 +38,6 @@ Thumbs.db
 
 # Local operational tools (not shipped)
 tools/
+
+#Claude folder
+.claude/
