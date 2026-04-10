@@ -18,7 +18,7 @@ DevBrain eliminates this. Deploy once, point any MCP client at the endpoint, and
          └────────────┬───────────┴──────────────────────────┘
                       │  MCP (Streamable HTTP)
               ┌───────▼────────┐
-              │ Azure Functions │ ← Entra ID auth
+              │ Azure Functions │ ← function key auth
               │   (DevBrain)   │
               └───────┬────────┘
                       │  Managed Identity
@@ -31,43 +31,21 @@ DevBrain eliminates this. Deploy once, point any MCP client at the endpoint, and
 ## Prerequisites
 
 - Azure subscription
-- Microsoft Entra ID tenant
 - [Azure Developer CLI (`azd`)](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd)
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
 
 ## Deploy in 5 Minutes
 
-### 1. Register the Entra app
-
-```powershell
-# Create the app registration
-az ad app create --display-name "DevBrain" --sign-in-audience AzureADMyOrg
-
-# Note the appId from the output — you'll need it below
-# Expose an API scope
-$scopeId = [guid]::NewGuid().ToString()
-az ad app update --id <APP_ID> `
-  --identifier-uris "api://<APP_ID>" `
-  --set "api.oauth2PermissionScopes=[{\`"id\`":\`"$scopeId\`",\`"adminConsentDescription\`":\`"Read and write documents\`",\`"adminConsentDisplayName\`":\`"documents.readwrite\`",\`"isEnabled\`":true,\`"type\`":\`"User\`",\`"value\`":\`"documents.readwrite\`"}]"
-```
-
-### 2. Deploy with azd
-
 ```powershell
 azd init -t Ignite-Solutions-Group/devbrain
-azd env set ENTRA_CLIENT_ID <APP_ID>
 azd up
 ```
 
-### 3. Update the app registration redirect URI
-
-```powershell
-# Get the function URL from azd output
-az ad app update --id <APP_ID> `
-  --web-redirect-uris "https://<FUNCTION_URL>/.auth/login/aad/callback"
-```
+After deployment, retrieve your MCP extension system key from the Azure Portal (**Function App > App keys > System keys > `mcp_extension`**) and use it in your client configuration below.
 
 ## Configure Your MCP Client
+
+Authentication uses the Azure Functions MCP extension system key, passed via the `x-functions-key` header. See [Authentication](#authentication) for details.
 
 ### Claude Code CLI (`.claude/mcp.json`)
 
@@ -76,7 +54,10 @@ az ad app update --id <APP_ID> `
   "mcpServers": {
     "devbrain": {
       "type": "url",
-      "url": "https://<FUNCTION_URL>/runtime/webhooks/mcp/sse"
+      "url": "https://<FUNCTION_URL>/runtime/webhooks/mcp/sse",
+      "headers": {
+        "x-functions-key": "<YOUR_FUNCTION_KEY>"
+      }
     }
   }
 }
@@ -84,12 +65,22 @@ az ad app update --id <APP_ID> `
 
 ### Claude Desktop (`claude_desktop_config.json`)
 
+Claude Desktop doesn't support remote MCP auth natively, so use [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) as a stdio-to-SSE proxy:
+
 ```json
 {
   "mcpServers": {
     "devbrain": {
-      "type": "url",
-      "url": "https://<FUNCTION_URL>/runtime/webhooks/mcp/sse"
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://<FUNCTION_URL>/runtime/webhooks/mcp/sse",
+        "--header",
+        "x-functions-key:${DEVBRAIN_KEY}"
+      ],
+      "env": {
+        "DEVBRAIN_KEY": "<YOUR_FUNCTION_KEY>"
+      }
     }
   }
 }
@@ -102,20 +93,29 @@ az ad app update --id <APP_ID> `
   "servers": {
     "devbrain": {
       "type": "http",
-      "url": "https://<FUNCTION_URL>/runtime/webhooks/mcp/sse"
+      "url": "https://<FUNCTION_URL>/runtime/webhooks/mcp/sse",
+      "headers": {
+        "x-functions-key": "<YOUR_FUNCTION_KEY>"
+      }
     }
   }
 }
 ```
 
+### Cursor
+
+Add via Cursor's MCP settings with the same URL and `x-functions-key` header.
+
 ## Tools Reference
+
+All tools accept an optional `project` parameter (defaults to `"default"`) to isolate documents by project.
 
 | Tool | Inputs | Purpose |
 |------|--------|---------|
-| `UpsertDocument` | `key` (required), `content` (required), `tags` (optional) | Create or replace a document by key |
-| `GetDocument` | `key` (required) | Retrieve a document by key |
-| `ListDocuments` | `prefix` (optional) | List document keys, optionally filtered by prefix |
-| `SearchDocuments` | `query` (required) | Substring search across keys and content |
+| `UpsertDocument` | `key` (required), `content` (required), `tags`, `project` | Create or replace a document by key |
+| `GetDocument` | `key` (required), `project` | Retrieve a document by key |
+| `ListDocuments` | `prefix`, `project` | List document keys, optionally filtered by prefix |
+| `SearchDocuments` | `query` (required), `project` | Substring search across keys and content |
 
 ## Key Conventions
 
@@ -149,6 +149,38 @@ Documents are organized by key prefix. These conventions are recommended but not
    cd src/DevBrain.Functions
    func start
    ```
+
+## Authentication
+
+DevBrain uses the Azure Functions MCP extension system key (`x-functions-key` header) for authentication. Easy Auth (Entra ID OAuth) was disabled due to upstream OAuth compatibility issues with MCP clients (see below).
+
+The system key is auto-generated by the MCP extension and can be retrieved from the Azure Portal under **Function App > App keys > System keys > `mcp_extension`**.
+
+## Known Limitations
+
+### Microsoft Entra ID + MCP OAuth — ecosystem-wide incompatibility
+
+DevBrain was originally designed to use Entra ID Easy Auth for OAuth-based clients. Two Entra enforcement issues block all web-based MCP clients:
+
+1. **`AADSTS9010010` — `resource` parameter rejected.** Since March 2026, Entra's v2 endpoint rejects OAuth requests that include both `scope` and `resource` parameters. Multiple MCP clients send `resource` by default (Claude, GitHub Copilot CLI). This is not client-specific — it affects any MCP client hitting an Entra-protected endpoint.
+
+2. **Dynamic Client Registration (DCR) not supported.** Web-based MCP clients (Claude web/mobile, ChatGPT) require DCR to initiate OAuth flows. Entra ID does not support DCR. There is no server-side workaround.
+
+These are upstream issues between Entra and the MCP OAuth spec. Easy Auth was disabled in favor of function key auth to unblock header-capable clients.
+
+**Status:** Blocked — requires changes in Microsoft Entra ID, MCP client OAuth implementations, or both.
+
+### Client compatibility
+
+| Client | Auth | Status |
+|--------|------|--------|
+| Claude Code CLI | `x-functions-key` header | Working |
+| VS Code / GitHub Copilot | `x-functions-key` header | Working |
+| Cursor | `x-functions-key` header | Working |
+| Claude Desktop | `x-functions-key` via `mcp-remote` proxy | Working (with workaround) |
+| Claude Web / Mobile | OAuth (DCR + `resource` param) | Blocked — both issues |
+| ChatGPT | OAuth (DCR required) | Blocked — DCR not supported |
+| GitHub Copilot Chat (web) | OAuth | Blocked |
 
 ## Contributing
 
