@@ -24,7 +24,7 @@ public sealed class CosmosDocumentStore : IDocumentStore
         return response.Resource;
     }
 
-    private static string EncodeId(string key) => Uri.EscapeDataString(key);
+    private static string EncodeId(string key) => key.Replace('/', ':');
 
     public async Task<BrainDocument?> GetAsync(string key, string project)
     {
