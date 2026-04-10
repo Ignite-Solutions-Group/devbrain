@@ -2,7 +2,7 @@
 
 All notable changes to DevBrain are tracked in this file. Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.3.0] — Unreleased
+## [1.3.0] — 2026-04-09
 
 Documentation, onboarding, and convention updates. No breaking API changes.
 
