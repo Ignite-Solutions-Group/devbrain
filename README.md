@@ -8,6 +8,27 @@ Every AI tool starts from zero. You paste the same sprint doc into Claude, copy 
 
 DevBrain eliminates this. Deploy once, point any MCP client at the endpoint, and every AI tool you use shares the same persistent knowledge store.
 
+## Why DevBrain over alternatives
+
+**One instance. Every project. Any AI tool.**
+
+Deploy DevBrain once and every project you work on shares the same knowledge store. Load context from multiple projects in a single session — no workspace switching, no separate deployments, no file uploads.
+
+```
+# Morning session — three projects, three tool calls
+GetDocument(key="state/current", project="acme-platform")
+GetDocument(key="state/current", project="devbrain")
+GetDocument(key="state/current", project="client-abc")
+```
+
+Compare that to alternatives:
+
+- **Serena** — per-repo MCP server, requires workspace switching between projects
+- **Claude Project Knowledge** — manual file uploads, single project scope, resets between sessions
+- **Local markdown files** — not shared across AI tools, no persistence
+
+DevBrain is the only approach that gives every AI tool (Claude, Copilot, Codex, Cursor) shared persistent access across all your projects from a single deployed endpoint.
+
 ## How It Works
 
 ```
