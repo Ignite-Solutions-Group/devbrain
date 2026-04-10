@@ -16,9 +16,9 @@ Deploy DevBrain once and every project you work on shares the same knowledge sto
 
 ```
 # Morning session — three projects, three tool calls
-GetDocument(key="state/current", project="acme-platform")
-GetDocument(key="state/current", project="devbrain")
-GetDocument(key="state/current", project="client-abc")
+GetDocument(key="state:current", project="acme-platform")
+GetDocument(key="state:current", project="devbrain")
+GetDocument(key="state:current", project="client-abc")
 ```
 
 Compare that to alternatives:
@@ -73,7 +73,7 @@ $env:DEVBRAIN_KEY = '<YOUR_FUNCTION_KEY>'
 ./scripts/seed-devbrain.ps1
 ```
 
-The script reads the Function App URL from the active azd environment (`AZURE_FUNCTION_URL`) and the MCP key from `$env:DEVBRAIN_KEY`, prompting for either if not set. It calls the DevBrain MCP endpoint directly and upserts a baseline set of documents (currently `ref/devbrain-usage` in the `default` project). Re-running is safe — every upsert is a full overwrite. Source content for the seed lives under [`docs/seed/`](docs/seed/).
+The script reads the Function App URL from the active azd environment (`AZURE_FUNCTION_URL`) and the MCP key from `$env:DEVBRAIN_KEY`, prompting for either if not set. It calls the DevBrain MCP endpoint directly and upserts a baseline set of documents (currently `ref:devbrain-usage` in the `default` project). Re-running is safe — every upsert is a full overwrite. Source content for the seed lives under [`docs/seed/`](docs/seed/).
 
 ## Configure Your MCP Client
 
@@ -151,12 +151,12 @@ DevBrain is only as useful as the context your AI tools actually load. The recom
 
 At the start of every session, load project context from DevBrain:
 
-1. GetDocument(key="state/current", project="{your-project}")
-2. If a sprint is active: GetDocument(key="sprint/{sprint-name}", project="{your-project}")
+1. GetDocument(key="state:current", project="{your-project}")
+2. If a sprint is active: GetDocument(key="sprint:{sprint-name}", project="{your-project}")
 
 Before ending a session, write back any significant changes:
-- UpsertDocument key="state/current" if project state changed
-- UpsertDocument key="sprint/{name}" if sprint progress changed
+- UpsertDocument key="state:current" if project state changed
+- UpsertDocument key="sprint:{name}" if sprint progress changed
 
 DevBrain is the canonical source of truth. Do not ask the user to upload
 files or paste context — read it directly from DevBrain.
@@ -185,13 +185,15 @@ All tools accept an optional `project` parameter (defaults to `"default"`) to is
 
 Documents are organized by key prefix. These conventions are recommended but not enforced:
 
+Keys use colon as the separator (e.g. `sprint:license-sync`). Slash-separated keys (`sprint/license-sync`) are still accepted for backward compatibility but colons are the canonical convention.
+
 | Prefix | Use |
 |--------|-----|
-| `sprint/{name}` | Sprint specs, e.g. `sprint/license-sync` |
-| `state/current` | Current project state document |
-| `arch/{name}` | Architecture docs |
-| `decision/{name}` | Architecture decision records |
-| `ref/{name}` | Reference material, infra constants |
+| `sprint:{name}` | Sprint specs, e.g. `sprint:license-sync` |
+| `state:current` | Current project state document |
+| `arch:{name}` | Architecture docs |
+| `decision:{name}` | Architecture decision records |
+| `ref:{name}` | Reference material, infra constants |
 
 ## Local Development
 

@@ -191,7 +191,7 @@ $seedDir = Join-Path $repoRoot 'docs/seed'
 
 $documents = @(
     @{
-        Key     = 'ref/devbrain-usage'
+        Key     = 'ref:devbrain-usage'
         Project = 'default'
         File    = Join-Path $seedDir 'ref-devbrain-usage.md'
         Tags    = @('meta', 'instructions', 'usage')
