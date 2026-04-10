@@ -2,6 +2,27 @@
 
 All notable changes to DevBrain are tracked in this file. Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] — 2026-04-09
+
+Colon keys are now the canonical user-facing convention. No breaking API changes — slash keys continue to work via the SQL-query fallback.
+
+### Changed
+- `host.json` MCP `instructions` now tells clients that keys use colon as separator, with examples (`state:current`, `sprint:my-feature`, `ref:notes`).
+- `host.json` `serverVersion` bumped to `1.4.0`.
+- `DevBrain.Functions.csproj` `<Version>` bumped to `1.4.0`.
+- README "Key Conventions" table flipped from slash to colon; added a line noting slash keys remain accepted for backward compatibility.
+- README "Session Startup / AGENTS.md" example (`AGENTS.md` / `CLAUDE.md` blocks) now shows colon keys.
+- README "Why DevBrain" morning-session snippet now shows `state:current` instead of `state/current`.
+- README "First Run" paragraph updated to reference `ref:devbrain-usage`.
+- `docs/seed/ref-devbrain-usage.md` key-conventions table and session-startup examples flipped to colons; added guidance that colons are canonical.
+- `scripts/seed-devbrain.ps1` now seeds the `ref:devbrain-usage` key instead of `ref/devbrain-usage`.
+- DevBrain documents across the `devbrain` and `default` projects re-upserted under colon keys; legacy slash-keyed originals removed.
+
+### Notes
+- `CosmosDocumentStore.EncodeId` (`key.Replace('/', ':')`) is unchanged and is effectively a no-op for well-formed colon keys. It stays as a safety net for any slash keys that slip through.
+- The `GetAsync` query-by-`c.key` fallback is unchanged, so any external integrations still using slash keys continue to work.
+- `docs/devbrain-spec-v1.md` is left as-is — it is the historical v1 spec.
+
 ## [1.3.0] — 2026-04-09
 
 Documentation, onboarding, and convention updates. No breaking API changes.
