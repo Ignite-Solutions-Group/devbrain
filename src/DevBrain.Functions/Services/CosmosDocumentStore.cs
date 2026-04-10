@@ -18,6 +18,7 @@ public sealed class CosmosDocumentStore : IDocumentStore
 
     public async Task<BrainDocument> UpsertAsync(BrainDocument document)
     {
+        document.Id = EncodeId(document.Key);
         var response = await _container.UpsertItemAsync(
             document,
             new PartitionKey(document.Key));
@@ -29,7 +30,7 @@ public sealed class CosmosDocumentStore : IDocumentStore
         try
         {
             var response = await _container.ReadItemAsync<BrainDocument>(
-                key,
+                EncodeId(key),
                 new PartitionKey(key));
             var doc = response.Resource;
             return doc.Project == project ? doc : null;
@@ -39,6 +40,11 @@ public sealed class CosmosDocumentStore : IDocumentStore
             return null;
         }
     }
+
+    // Cosmos DB disallows '/', '\\', '?', '#' in document ids. Keys like
+    // "sprint/license-sync" must be encoded for the id field; the raw key is
+    // still stored on the Key property and used as the partition key value.
+    private static string EncodeId(string key) => Uri.EscapeDataString(key);
 
     public async Task<IReadOnlyList<BrainDocument>> ListAsync(string project, string? prefix = null)
     {
