@@ -11,8 +11,8 @@ DevBrain organizes documents by project. If a query returns no results, you are 
 
 ## Session Startup Pattern
 For any project, the correct session startup is:
-1. `GetDocument(key="state/current", project="{project}")` — load current state
-2. If working a sprint: `GetDocument(key="sprint/{name}", project="{project}")` — load active spec
+1. `GetDocument(key="state:current", project="{project}")` — load current state
+2. If working a sprint: `GetDocument(key="sprint:{name}", project="{project}")` — load active spec
 3. Updates: write directly with `UpsertDocument` — no manual upload needed
 
 This replaces any manual file upload workflow. DevBrain is the canonical source.
@@ -33,7 +33,7 @@ ListDocuments(project: "devbrain")
 
 ### Get a specific document
 ```
-GetDocument(key: "state/current", project: "devbrain")
+GetDocument(key: "state:current", project: "devbrain")
 ```
 
 ### Search across a project
@@ -42,13 +42,16 @@ SearchDocuments(query: "durable functions", project: "devbrain")
 ```
 
 ## Key Conventions
+
+Keys use **colon** as the separator. Slash-separated keys (`sprint/foo`) still work for backward compatibility, but colons are the canonical, recommended convention — they signal "DevBrain key" at a glance and avoid being confused with file paths.
+
 | Prefix | Use |
 |---|---|
-| `sprint/{name}` | Sprint specs and retrospectives |
-| `state/current` | Current project state |
-| `arch/{name}` | Architecture docs |
-| `decision/{name}` | Architecture decision records |
-| `ref/{name}` | Reference material |
+| `sprint:{name}` | Sprint specs and retrospectives |
+| `state:current` | Current project state |
+| `arch:{name}` | Architecture docs |
+| `decision:{name}` | Architecture decision records |
+| `ref:{name}` | Reference material |
 
 ## If You Get No Results
 1. Check casing — project names and keys are case sensitive

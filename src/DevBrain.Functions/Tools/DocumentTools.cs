@@ -74,7 +74,7 @@ public sealed class DocumentTools
 
     [Function(nameof(ListDocuments))]
     public async Task<string> ListDocuments(
-        [McpToolTrigger("ListDocuments", "List stored document keys, optionally filtered by prefix.")]
+        [McpToolTrigger("ListDocuments", "List stored document keys, optionally filtered by prefix. If the project has no matching documents and a similarly-named project exists, a single suggestion entry (key \"_suggestion\") is returned instead.")]
             ToolInvocationContext context,
         [McpToolProperty("prefix", "Optional key prefix to filter by (e.g. sprint:).")]
             string? prefix,
@@ -82,6 +82,14 @@ public sealed class DocumentTools
             string? project)
     {
         var documents = await _store.ListAsync(project ?? "default", prefix);
+
+        if (documents.Count == 1 && documents[0].Key == "_suggestion")
+        {
+            return JsonSerializer.Serialize(new[]
+            {
+                new { documents[0].Key, documents[0].Content }
+            });
+        }
 
         var projection = documents.Select(d => new
         {
@@ -97,7 +105,7 @@ public sealed class DocumentTools
 
     [Function(nameof(SearchDocuments))]
     public async Task<string> SearchDocuments(
-        [McpToolTrigger("SearchDocuments", "Full-text substring search across document keys and content.")]
+        [McpToolTrigger("SearchDocuments", "Full-text substring search across document keys and content. If the project has no matches and a similarly-named project exists, a single suggestion entry (key \"_suggestion\") is returned instead.")]
             ToolInvocationContext context,
         [McpToolProperty("query", "Search term to match against keys and content.", isRequired: true)]
             string query,
@@ -107,6 +115,14 @@ public sealed class DocumentTools
         try
         {
             var documents = await _store.SearchAsync(query, project ?? "default");
+
+            if (documents.Count == 1 && documents[0].Key == "_suggestion")
+            {
+                return JsonSerializer.Serialize(new[]
+                {
+                    new { documents[0].Key, documents[0].Content }
+                });
+            }
 
             var projection = documents.Select(d => new
             {
