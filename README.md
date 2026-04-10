@@ -1,6 +1,6 @@
 # DevBrain
 
-A remote MCP server that gives any AI tool persistent, shared access to developer knowledge — one brain, zero upload tax.
+An Azure-native remote MCP server — built on Azure Functions and Cosmos DB — that gives any AI tool persistent, shared access to developer knowledge. One brain, zero upload tax, for teams already living in the Microsoft Azure dev ecosystem.
 
 ## The Problem
 
