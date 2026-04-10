@@ -205,12 +205,12 @@ resource storageQueueDataMessageProcessorRole 'Microsoft.Authorization/roleAssig
 // ─── Monitoring Metrics Publisher (for Function App → App Insights) ────────
 
 resource monitoringMetricsPublisherRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(applicationInsights.id, functionApp.id, '3913510d-42f4-52ac-2049-1a32870e3ca1')
+  name: guid(applicationInsights.id, functionApp.id, '3913510d-42f4-4e42-8a64-420c390055eb')
   scope: applicationInsights
   properties: {
     principalId: functionApp.identity.principalId
     principalType: 'ServicePrincipal'
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3913510d-42f4-52ac-2049-1a32870e3ca1')
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3913510d-42f4-4e42-8a64-420c390055eb')
   }
 }
 
