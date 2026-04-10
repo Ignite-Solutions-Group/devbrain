@@ -238,10 +238,11 @@ These are upstream issues between Entra and the MCP OAuth spec. Easy Auth was di
 
 | Client | Auth | Status |
 |--------|------|--------|
-| Claude Code CLI | `x-functions-key` header | Working |
-| VS Code / GitHub Copilot | `x-functions-key` header | Working |
-| Cursor | `x-functions-key` header | Working |
-| Claude Desktop | `x-functions-key` via `mcp-remote` proxy | Working (with workaround) |
+| Claude Code CLI (Windows) | `x-functions-key` header | Working |
+| Claude Desktop (Windows) | `x-functions-key` via `mcp-remote` proxy | Working (with workaround) |
+| VS Code / GitHub Copilot (Windows) | `x-functions-key` header | Working |
+| Codex App (Windows) | `x-functions-key` header | Working |
+| Cursor | `x-functions-key` header | Expected to work (not tested) |
 | Claude Web / Mobile | OAuth (DCR + `resource` param) | Blocked — both issues |
 | ChatGPT | OAuth (DCR required) | Blocked — DCR not supported |
 | GitHub Copilot Chat (web) | OAuth | Blocked |
