@@ -3,7 +3,6 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AzureFunctionsVersion>v4</AzureFunctionsVersion>
-    <AzureCosmosDisableNewtonsoftJsonCheck>true</AzureCosmosDisableNewtonsoftJsonCheck>
     <UserSecretsId>6221c643-6ba8-4163-98a2-2241c8ddd211</UserSecretsId>
   </PropertyGroup>
 
@@ -16,6 +15,7 @@
     <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.58.0" />
     <PackageReference Include="Azure.Identity" Version="1.20.0" />
     <PackageReference Include="Microsoft.Extensions.Azure" Version="1.13.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
   </ItemGroup>
 
   <ItemGroup>
