@@ -4,7 +4,7 @@
     "mcp": {
       "instructions": "DevBrain is a developer knowledge store. Use UpsertDocument to save sprint docs, architecture notes, or project state. Use GetDocument to retrieve by key. Use ListDocuments to browse what's stored. Use SearchDocuments to find content by keyword.",
       "serverName": "DevBrain",
-      "serverVersion": "1.0.0"
+      "serverVersion": "1.3.0"
     }
   }
 }
