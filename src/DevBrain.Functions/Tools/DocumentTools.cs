@@ -19,7 +19,7 @@ public sealed class DocumentTools
     public async Task<string> UpsertDocument(
         [McpToolTrigger("UpsertDocument", "Create or replace a document by key.")]
             ToolInvocationContext context,
-        [McpToolProperty("key", "Document key (e.g. sprint/license-sync).", isRequired: true)]
+        [McpToolProperty("key", "Document key (e.g. sprint:license-sync).", isRequired: true)]
             string key,
         [McpToolProperty("content", "Raw text content of the document.", isRequired: true)]
             string content,
@@ -76,7 +76,7 @@ public sealed class DocumentTools
     public async Task<string> ListDocuments(
         [McpToolTrigger("ListDocuments", "List stored document keys, optionally filtered by prefix.")]
             ToolInvocationContext context,
-        [McpToolProperty("prefix", "Optional key prefix to filter by (e.g. sprint/).")]
+        [McpToolProperty("prefix", "Optional key prefix to filter by (e.g. sprint:).")]
             string? prefix,
         [McpToolProperty("project", "Project scope (default: \"default\").")]
             string? project)

@@ -6,9 +6,9 @@ All documents below are namespaced by the `project` parameter — pass the same 
 
 ## Required
 
-### `state/current` — the living project snapshot
+### `state:current` — the living project snapshot
 
-The single most important document. Every AI session should start with `GetDocument(key="state/current", project="{your-project}")`. Keep it short enough to load cheaply, detailed enough to orient a new session without follow-up questions.
+The single most important document. Every AI session should start with `GetDocument(key="state:current", project="{your-project}")`. Keep it short enough to load cheaply, detailed enough to orient a new session without follow-up questions.
 
 Recommended sections:
 
@@ -22,9 +22,9 @@ Update whenever any of those sections materially change. Treat it as the canonic
 
 ## When a sprint is active
 
-### `sprint/{name}` — the active sprint spec
+### `sprint:{name}` — the active sprint spec
 
-Create one per sprint, keyed by a short slug (e.g. `sprint/license-sync`). Load it at session start whenever work on that sprint is in flight.
+Create one per sprint, keyed by a short slug (e.g. `sprint:license-sync`). Load it at session start whenever work on that sprint is in flight.
 
 Recommended sections:
 
@@ -38,17 +38,17 @@ When the sprint ends, leave the document in place as a historical record — don
 
 ## Recommended
 
-### `arch/overview` — high-level architecture
+### `arch:overview` — high-level architecture
 
-A stable document describing the system's shape: major components, data flow, external dependencies, deployment topology. Updated infrequently — only when the architecture actually changes. Keep it short; link to `decision/{name}` documents for the reasoning behind specific choices.
+A stable document describing the system's shape: major components, data flow, external dependencies, deployment topology. Updated infrequently — only when the architecture actually changes. Keep it short; link to `decision:{name}` documents for the reasoning behind specific choices.
 
 ## Seeding a new project
 
 A minimal first-day setup:
 
 ```
-UpsertDocument(key="state/current",  project="{your-project}", content="...")
-UpsertDocument(key="arch/overview",  project="{your-project}", content="...")
+UpsertDocument(key="state:current",  project="{your-project}", content="...")
+UpsertDocument(key="arch:overview",  project="{your-project}", content="...")
 ```
 
-Add `sprint/{name}` documents as sprints start. Add `decision/{name}` and `ref/{name}` documents as the project accumulates history.
+Add `sprint:{name}` documents as sprints start. Add `decision:{name}` and `ref:{name}` documents as the project accumulates history.
