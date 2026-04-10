@@ -1,4 +1,3 @@
-using System.Net;
 using DevBrain.Functions.Models;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Configuration;
@@ -26,18 +25,22 @@ public sealed class CosmosDocumentStore : IDocumentStore
 
     public async Task<BrainDocument?> GetAsync(string key, string project)
     {
-        try
+        // Use a query instead of ReadItemAsync because keys containing forward
+        // slashes (e.g. "state/current") are misinterpreted as path separators
+        // by the Cosmos DB REST API point-read endpoint.
+        var queryDefinition = new QueryDefinition(
+                "SELECT * FROM c WHERE c.key = @key AND c.project = @project OFFSET 0 LIMIT 1")
+            .WithParameter("@key", key)
+            .WithParameter("@project", project);
+
+        using var iterator = _container.GetItemQueryIterator<BrainDocument>(queryDefinition);
+        if (iterator.HasMoreResults)
         {
-            var response = await _container.ReadItemAsync<BrainDocument>(
-                key,
-                new PartitionKey(key));
-            var doc = response.Resource;
-            return doc.Project == project ? doc : null;
+            var response = await iterator.ReadNextAsync();
+            return response.FirstOrDefault();
         }
-        catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
-        {
-            return null;
-        }
+
+        return null;
     }
 
     public async Task<IReadOnlyList<BrainDocument>> ListAsync(string project, string? prefix = null)
