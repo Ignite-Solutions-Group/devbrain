@@ -6,6 +6,9 @@ All notable changes to DevBrain are tracked in this file. Versions follow [Seman
 
 Colon keys are now the canonical user-facing convention. No breaking API changes — slash keys continue to work via the SQL-query fallback.
 
+### Added
+- **"Did you mean?" project suggestions.** When `ListDocuments` or `SearchDocuments` return zero results, `CosmosDocumentStore` now runs a `SELECT DISTINCT VALUE c.project FROM c` and looks for a similar known project name (case-insensitive startsWith / contains / reverse-contains). If one is found, a single synthetic entry with `key: "_suggestion"` is returned carrying a "Did you mean project 'X'?" message. Skips the suggestion when the requested project already exists (empty result is then a legitimate miss, not a typo). The extra query only runs on the empty-result path, so the hot path is unaffected. Tool descriptions on `ListDocuments` and `SearchDocuments` updated to note the behavior.
+
 ### Changed
 - `host.json` MCP `instructions` now tells clients that keys use colon as separator, with examples (`state:current`, `sprint:my-feature`, `ref:notes`).
 - `host.json` `serverVersion` bumped to `1.4.0`.
