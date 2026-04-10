@@ -4,9 +4,6 @@ param location string = 'eastus'
 @description('Environment name used for resource naming (set by azd).')
 param environmentName string
 
-@description('Entra app registration client ID for the DevBrain application.')
-param entraClientId string
-
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 
 // ─── Storage Account (required by Azure Functions) ───────────────────────────
@@ -154,36 +151,6 @@ resource storageBlobDataOwnerRole 'Microsoft.Authorization/roleAssignments@2022-
     principalId: functionApp.identity.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
-  }
-}
-
-// ─── Easy Auth (Entra ID) ────────────────────────────────────────────────────
-
-resource functionAppAuth 'Microsoft.Web/sites/config@2024-04-01' = {
-  parent: functionApp
-  name: 'authsettingsV2'
-  properties: {
-    globalValidation: {
-      requireAuthentication: true
-      unauthenticatedClientAction: 'Return401'
-    }
-    identityProviders: {
-      azureActiveDirectory: {
-        enabled: true
-        registration: {
-          clientId: entraClientId
-          openIdIssuer: 'https://login.microsoftonline.com/${tenant().tenantId}/v2.0'
-        }
-        validation: {
-          allowedAudiences: [
-            'api://${entraClientId}'
-          ]
-        }
-      }
-    }
-    platform: {
-      enabled: true
-    }
   }
 }
 
