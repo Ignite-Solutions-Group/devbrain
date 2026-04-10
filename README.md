@@ -64,6 +64,17 @@ azd up
 
 After deployment, retrieve your MCP extension system key from the Azure Portal (**Function App > App keys > System keys > `mcp_extension`**) and use it in your client configuration below.
 
+## First Run
+
+After a fresh `azd up`, seed the default reference documents so any AI tool connecting to your new instance immediately has usage guidance available:
+
+```powershell
+$env:DEVBRAIN_KEY = '<YOUR_FUNCTION_KEY>'
+./scripts/seed-devbrain.ps1
+```
+
+The script reads the Function App URL from the active azd environment (`AZURE_FUNCTION_URL`) and the MCP key from `$env:DEVBRAIN_KEY`, prompting for either if not set. It calls the DevBrain MCP endpoint directly and upserts a baseline set of documents (currently `ref/devbrain-usage` in the `default` project). Re-running is safe — every upsert is a full overwrite. Source content for the seed lives under [`docs/seed/`](docs/seed/).
+
 ## Configure Your MCP Client
 
 Authentication uses the Azure Functions MCP extension system key, passed via the `x-functions-key` header. See [Authentication](#authentication) for details.
@@ -126,6 +137,38 @@ Claude Desktop doesn't support remote MCP auth natively, so use [`mcp-remote`](h
 ### Cursor
 
 Add via Cursor's MCP settings with the same URL and `x-functions-key` header.
+
+## Session Startup / AGENTS.md
+
+DevBrain is only as useful as the context your AI tools actually load. The recommended pattern is a small `AGENTS.md` file at the repo root that tells any AI tool how to pull context from DevBrain at the start of a session.
+
+**Why AGENTS.md:** GitHub Copilot, Cursor, and Codex all read `AGENTS.md`. Claude Code reads `CLAUDE.md` but can `@import` other files — so a one-line `@AGENTS.md` in `CLAUDE.md` keeps a single source of truth across every tool.
+
+### `AGENTS.md`
+
+```markdown
+## DevBrain Session Startup
+
+At the start of every session, load project context from DevBrain:
+
+1. GetDocument(key="state/current", project="{your-project}")
+2. If a sprint is active: GetDocument(key="sprint/{sprint-name}", project="{your-project}")
+
+Before ending a session, write back any significant changes:
+- UpsertDocument key="state/current" if project state changed
+- UpsertDocument key="sprint/{name}" if sprint progress changed
+
+DevBrain is the canonical source of truth. Do not ask the user to upload
+files or paste context — read it directly from DevBrain.
+```
+
+### `CLAUDE.md`
+
+```markdown
+@AGENTS.md
+```
+
+New to a project? See [docs/project-init.md](docs/project-init.md) for the recommended first documents to seed.
 
 ## Tools Reference
 
