@@ -17,11 +17,14 @@ public sealed class CosmosDocumentStore : IDocumentStore
 
     public async Task<BrainDocument> UpsertAsync(BrainDocument document)
     {
+        document.Id = EncodeId(document.Key);
         var response = await _container.UpsertItemAsync(
             document,
             new PartitionKey(document.Key));
         return response.Resource;
     }
+
+    private static string EncodeId(string key) => Uri.EscapeDataString(key);
 
     public async Task<BrainDocument?> GetAsync(string key, string project)
     {
