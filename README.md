@@ -177,15 +177,27 @@ All tools accept an optional `project` parameter (defaults to `"default"`) to is
 | Tool | Inputs | Purpose |
 |------|--------|---------|
 | `UpsertDocument` | `key` (required), `content` (required), `tags`, `project` | Create or replace a document by key |
+| `AppendDocument` | `key` (required), `content` (required), `separator`, `tags`, `project` | Append content to an existing document (or create it). Server-side concatenation; tag union. |
+| `UpsertDocumentChunked` | `key` (required), `content` (required), `chunkIndex` (required), `totalChunks` (required), `tags`, `project` | Upload a document in multiple chunks when it is too large to emit in a single LLM turn. |
 | `GetDocument` | `key` (required), `project` | Retrieve a document by key |
 | `ListDocuments` | `prefix`, `project` | List document keys, optionally filtered by prefix |
 | `SearchDocuments` | `query` (required), `project` | Substring search across keys and content |
+| `DeleteDocument` | `key` (required), `project` | Delete a document by key. Idempotent on missing keys. |
+
+### When to use Append vs Chunked
+
+Both tools exist to work around the LLM-client per-turn output budget, but they solve different problems:
+
+- **`AppendDocument`** — for **growing logs** (session history, decision logs, audit trails). Each call adds a short entry to a document whose existing body the caller doesn't need to re-emit. Concurrent appenders are serialized via Cosmos ETag concurrency with bounded retry.
+- **`UpsertDocumentChunked`** — for **a single document that's too big to emit atomically**. Callers split the content across calls with `(chunkIndex, totalChunks)`; chunks may arrive out of order. The server concatenates on the final chunk and upserts the real key in one step. Abandoned uploads expire automatically.
+
+Pick Append when the doc grows over time. Pick Chunked when you already have the whole thing and just can't fit it in one call.
 
 ## Key Conventions
 
 Documents are organized by key prefix. These conventions are recommended but not enforced:
 
-Keys use colon as the separator (e.g. `sprint:license-sync`). Slash-separated keys (`sprint/license-sync`) are still accepted for backward compatibility but colons are the canonical convention.
+Keys use colon as the separator (e.g. `sprint:license-sync`). **Writes** (`UpsertDocument`, `AppendDocument`, `UpsertDocumentChunked`) reject keys containing `/` with a "did you mean" error suggesting the colon form. **Reads** (`GetDocument`, `ListDocuments`, `SearchDocuments`) and `DeleteDocument` continue to accept slash keys so legacy data and cleanup operations keep working.
 
 | Prefix | Use |
 |--------|-----|

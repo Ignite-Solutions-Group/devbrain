@@ -76,6 +76,11 @@ resource cosmosContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/con
         paths: ['/key']
         kind: 'Hash'
       }
+      // Enable per-item TTL (defaultTtl: -1 means "TTL feature on, but no default
+      // expiration"). Real documents have no `ttl` field so they live forever;
+      // chunked-upload staging docs (UpsertDocumentChunked) set `ttl` explicitly
+      // so abandoned uploads self-clean after a few hours.
+      defaultTtl: -1
     }
   }
 }

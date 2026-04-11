@@ -2,9 +2,9 @@
   "version": "2.0",
   "extensions": {
     "mcp": {
-      "instructions": "DevBrain is a developer knowledge store. Use UpsertDocument to save sprint docs, architecture notes, or project state. Use GetDocument to retrieve by key. Use ListDocuments to browse what's stored. Use SearchDocuments to find content by keyword. Keys use colon as separator: state:current, sprint:my-feature, ref:notes.",
+      "instructions": "DevBrain is a developer knowledge store. Use UpsertDocument to save sprint docs, architecture notes, or project state. Use GetDocument to retrieve by key. Use ListDocuments to browse what's stored. Use SearchDocuments to find content by keyword. Use DeleteDocument to remove a document. Use AppendDocument for append-only logs (session history, decision logs) where re-emitting the whole body is wasteful. Use UpsertDocumentChunked when a document is too large to emit in a single turn. Keys use colon as separator: state:current, sprint:my-feature, ref:notes. Writes require colon keys.",
       "serverName": "DevBrain",
-      "serverVersion": "1.4.0"
+      "serverVersion": "1.5.0"
     }
   }
 }

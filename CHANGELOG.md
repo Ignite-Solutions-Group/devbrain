@@ -2,6 +2,29 @@
 
 All notable changes to DevBrain are tracked in this file. Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] — 2026-04-10
+
+Three new write primitives — `DeleteDocument`, `AppendDocument`, `UpsertDocumentChunked` — plus key-hygiene enforcement on the write path. Additive, no breaking API changes.
+
+### Added
+- **`DeleteDocument(key, project?)`** — point-delete by key within a project. Idempotent: deleting a missing key returns `{ deleted: false }` with a "not found" note, not an error. Resolves the target via the project-scoped `GetAsync` query first (so it never deletes across project boundaries) and then deletes by the stored id (encoded form, URL-safe) and raw key (partition key). Accepts both colon and slash keys so legacy slash-orphans can be cleaned up through the tool.
+- **`AppendDocument(key, content, separator?, tags?, project?)`** — append-only primitive for growing logs (session history, decision logs, audit trails). Creates the document if absent; otherwise concatenates `existing + separator + content` server-side. Default separator is two newlines. Tags are unioned with any existing tags. Concurrent appenders are serialized via Cosmos ETag optimistic concurrency with up to 5 retries. Refuses cross-project key collisions explicitly (never silently appends to another project's doc).
+- **`UpsertDocumentChunked(key, content, chunkIndex, totalChunks, tags?, project?)`** — multi-part upload for documents too big to emit in a single LLM turn. Each call stages its chunk in a `_staging:{realKey}` document; the final chunk triggers server-side concatenation, a normal upsert to the real key, and deletion of the staging doc. Chunks may arrive out of order. A changed `totalChunks` mid-upload resets the staging buffer. Staging documents self-clean via Cosmos per-item TTL (currently 4 hours) so abandoned uploads don't linger.
+- **Slash-key rejection on write paths.** `UpsertDocument`, `AppendDocument`, and `UpsertDocumentChunked` now reject keys containing `/` with an actionable error: *"Keys must use ':' as separator. Got 'X' — did you mean 'Y'?"*. Reads and `DeleteDocument` continue to accept slash keys so legacy data and cleanup operations keep working.
+- **Per-item TTL enabled on the Cosmos container.** `infra/main.bicep` now sets `defaultTtl: -1` on the `documents` container, enabling the TTL feature without imposing a default expiration. Real documents have no `ttl` field and live forever; only chunked-upload staging docs set it explicitly.
+
+### Changed
+- `README.md` "Tools Reference" table adds the three new tools. A new "When to use Append vs Chunked" subsection explains the distinction (growing logs vs. one-shot large docs).
+- `README.md` "Key Conventions" note now states explicitly that writes reject slash keys while reads accept them.
+- `host.json` MCP `instructions` mentions the three new tools and the "writes require colon keys" rule.
+- `host.json` `serverVersion` bumped to `1.5.0`.
+- `DevBrain.Functions.csproj` `<Version>` bumped to `1.5.0`.
+
+### Notes
+- The Cosmos container's partition key path is `/key` (not `/project`), so two documents with the same key in different projects would physically collide. This is a pre-existing latent issue unrelated to v1.5. `AppendDocument` refuses cross-project collisions by raising an explicit error rather than silently clobbering; `UpsertDocument` retains its historical clobber-on-collision behavior for parity with v1.4 callers.
+- `DeleteDocument` uses `DeleteItemAsync(EncodeId(key), PartitionKey(key))`. Because `EncodeId` strips `/` from the id, the `ReadItemAsync` URL-path-separator problem that affected v1.2's `GetDocument` does not apply — the old "future: delete needs query-then-delete" note in `ref:known-issues` is therefore moot.
+- `ChunkedStaging.cs` models the staging payload as an order-agnostic `{ totalChunks, chunks: [{ index, content }] }` JSON blob stored in the staging doc's `content` field. No schema changes were needed on the container beyond enabling TTL.
+
 ## [1.4.0] — 2026-04-09
 
 Colon keys are now the canonical user-facing convention. No breaking API changes — slash keys continue to work via the SQL-query fallback.
