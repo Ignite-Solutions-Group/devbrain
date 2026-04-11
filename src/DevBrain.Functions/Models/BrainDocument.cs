@@ -24,4 +24,14 @@ public sealed class BrainDocument
 
     [JsonPropertyName("updatedBy")]
     public string UpdatedBy { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Per-item TTL in seconds. Null for normal documents (no expiration). Set only
+    /// by <see cref="Services.CosmosDocumentStore.UpsertChunkAsync"/> on chunked-upload
+    /// staging documents so abandoned uploads self-clean. Requires the Cosmos container
+    /// to have <c>defaultTtl</c> enabled (see infra/main.bicep).
+    /// </summary>
+    [JsonPropertyName("ttl")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Ttl { get; set; }
 }
