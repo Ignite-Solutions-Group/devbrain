@@ -1,10 +1,34 @@
 {
   "version": "2.0",
+  "logging": {
+    "logLevel": {
+      "default": "Information",
+      "Host.Results": "Information",
+      "Function": "Information",
+      "Host.Aggregator": "Information",
+      "DevBrain": "Debug",
+      "Microsoft": "Warning",
+      "Microsoft.Hosting.Lifetime": "Information"
+    },
+    "applicationInsights": {
+      "samplingSettings": {
+        "isEnabled": false
+      },
+      "enableDependencyTracking": true,
+      "enableLiveMetrics": false
+    }
+  },
   "extensions": {
+    "http": {
+      "routePrefix": ""
+    },
     "mcp": {
       "instructions": "DevBrain is a developer knowledge store. Use UpsertDocument to save sprint docs, architecture notes, or project state. Use GetDocument to retrieve by key. Use ListDocuments to browse what's stored. Use SearchDocuments to find content by keyword. Use DeleteDocument to remove a document. Use AppendDocument for append-only logs (session history, decision logs) where re-emitting the whole body is wasteful. Use UpsertDocumentChunked when a document is too large to emit in a single turn. Keys use colon as separator: state:current, sprint:my-feature, ref:notes. Writes require colon keys.",
       "serverName": "DevBrain",
-      "serverVersion": "1.5.0"
+      "serverVersion": "1.6.0",
+      "system": {
+        "webhookAuthorizationLevel": "anonymous"
+      }
     }
   }
 }
