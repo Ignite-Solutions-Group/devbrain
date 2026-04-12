@@ -2,4 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/DevBrain.Functions/DevBrain.Functions.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DevBrain.Functions.Tests/DevBrain.Functions.Tests.csproj" />
+  </Folder>
 </Solution>

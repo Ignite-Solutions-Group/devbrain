@@ -2,6 +2,70 @@
 
 All notable changes to DevBrain are tracked in this file. Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] — 2026-04-11
+
+Per-user OAuth replaces the function-key gate. DevBrain now acts as an RFC 7591 Dynamic Client Registration (DCR) facade in front of a single pre-registered Entra app, making it authenticatable from Claude Code CLI, Claude.ai web, VS Code, ChatGPT, and Cursor — all of which previously failed against Entra-direct MCP servers. Writes now record the real Entra UPN as `updatedBy` instead of `"unknown"`.
+
+### Hard cutover — no rollback path
+
+v1.6 is a one-way deploy. There is no dual-mode feature flag and no rollback runbook. If a v1.6 deployment fails its acceptance checks, the recovery path is a v1.6.1 forward-fix, not redeploying v1.5.0. The v1.5.0 tag remains in the back pocket as a worst-case escape hatch but is no longer treated as a routine smoke-test target. This is intentional — single-tenant posture + small known user population means the blast radius is small and the cost of a dual-mode rollback test surface exceeds the cost of a forward-fix. DevBrain remains "deploy once, it's yours" single-tenant by design.
+
+### Deploy prerequisite — must complete BEFORE `azd up`
+
+A tenant admin must create a single Entra app registration and wire its values through. Without this, the Function deploys successfully but every OAuth flow returns 500 at `/callback`.
+
+1. Create app registration `DevBrain` in the target tenant. **Set `signInAudience: AzureADMyOrg` (single-tenant)** — do NOT pick the multi-tenant option in the portal wizard.
+2. Add redirect URI: `https://{function-host}/callback`.
+3. Expose API: `documents.readwrite` scope.
+4. Set the `entraTenantId` and `entraClientId` Bicep parameters (e.g. `azd env set ENTRA_TENANT_ID <guid>` and `azd env set ENTRA_CLIENT_ID <guid>`).
+5. `azd up` (or `az deployment group create`). Bicep provisions the Key Vault and the `oauth_state` Cosmos container.
+6. Set the two Key Vault secrets manually — Bicep deliberately does not populate them:
+   - `az keyvault secret set --vault-name <kv> --name jwt-signing-secret --value $(openssl rand -base64 32)`
+   - `az keyvault secret set --vault-name <kv> --name entra-client-secret --value <secret from Entra app>`
+7. Restart the Function app so it picks up the Key Vault references.
+
+### Added
+
+- **DCR facade endpoints** under `src/DevBrain.Functions/Auth/DcrFacade/`:
+  - `POST /register` — RFC 7591 DCR. Returns an opaque `client_id` handle backed by the pre-registered Entra app. 90-day TTL on the registration record.
+  - `GET /authorize` — validates the client, generates DevBrain's own upstream PKCE pair, persists an `AuthTransaction`, and redirects to Entra. S256-only; plain PKCE is rejected; redirect URIs match exactly.
+  - `GET /callback` — exchanges the Entra code with DevBrain's own PKCE verifier (never the client's), mints a pre-committed JTI, creates the upstream token vault record at `upstream:{jti}`, and redirects back to the client's `redirect_uri` with a DevBrain code.
+  - `POST /token` — handles both `authorization_code` and `refresh_token` grants. Atomic code redemption (single-take) and refresh token rotation (every use mints a new refresh and invalidates the old one).
+  - `GET /.well-known/oauth-authorization-server` + `/.well-known/oauth-protected-resource` — DevBrain-hosted discovery documents. Everything points at DevBrain itself, never at Entra — claude-ai-mcp issue #82 requires this.
+- **`McpJwtValidationMiddleware` + `JwtAuthenticator`** — the MCP webhook gate. The `webhookAuthorizationLevel` is now `anonymous`; the JWT middleware is the sole authentication path for tool invocations. Populates `FunctionContext.Features.Get<ClaimsPrincipal>()` so `DocumentTools.GetCallerIdentity` continues to work with **zero code changes** — the existing `preferred_username` / `oid` extraction now sees real values.
+- **Single-tenant enforcement at the token layer.** Every issued JWT carries the configured `tid` claim. The middleware validates `tid` against `OAuth__EntraTenantId` **before** any Cosmos lookup, so cross-tenant tokens are rejected cheaply. This is a deliberate load-bearing decision — single-tenant is a permanent non-goal, not a current-phase simplification.
+- **New Cosmos container `oauth_state`** (`/key`, TTL enabled) holding five record kinds: `client:{id}`, `txn:{state}`, `code:{code}`, `upstream:{jti}`, `refresh:{token}`. Cosmos native TTL is best-effort — every read defensively re-checks `expiresAt` against an injected `TimeProvider`.
+- **Key Vault** (`kvdb{resourceToken}`) with soft-delete + purge protection. Function managed identity gets **both** `Key Vault Crypto User` and `Key Vault Secrets Officer` role assignments. Single-role configurations fail silently until the first key rotation — bake both in on day one.
+- **Upstream token encryption at rest via ASP.NET Core Data Protection.** `IUpstreamTokenProtector` / `DataProtectionUpstreamTokenProtector` wraps the Entra access + refresh tokens (as an `UpstreamTokenEnvelope`) behind a stable purpose string (`DevBrain.OAuth.UpstreamToken`). The Data Protection key ring is persisted to a new `dataprotection-keys` blob container in the existing storage account and wrapped by a new Key Vault key (`data-protection-key`, RSA 2048). Both `CosmosOAuthStateStore` and `FakeOAuthStateStore` route every upstream record save and read through the protector — a state-store-level test asserts this with a `FakeUpstreamTokenProtector` call counter.
+- **Full id_token JWKS validation in `EntraOAuthClient`.** Every Entra `id_token` is now fully validated (signature, issuer, audience, lifetime) against the tenant's OpenID Connect discovery document before any claim is read. Wired via `IConfigurationManager<OpenIdConnectConfiguration>` using the standard `Microsoft.IdentityModel.Protocols.OpenIdConnect` discovery infrastructure with its default 24-hour refresh. Validation failure raises the new `IdTokenValidationException`; `CallbackHandler` translates it into a local 400 with `invalid_grant` (a security event — the transaction is consumed but the client is not redirected, so the failure surfaces in logs rather than being papered over in the client's error UI).
+- **Test project `tests/DevBrain.Functions.Tests/`** (xUnit, `Microsoft.Extensions.TimeProvider.Testing`). 102 tests cover all ten acceptance gates:
+  1. **CVE-2025-69196** audience guard — JWTs with base-URL audience rejected
+  2. **PKCE downgrade** — mismatched, empty, short, long verifiers all rejected
+  3. **Authorization code replay** — atomic single-take, second redeem returns `invalid_grant`
+  4. **Expired transaction** — transactions older than 600s rejected before any upstream call (uses `FakeTimeProvider`, no sleeping)
+  5. **Refresh token rotation** — old refresh invalid after use, new refresh works
+  6. **Per-user identity E2E** — rehydrated `ClaimsPrincipal` carries the real Entra UPN from `upstream:{jti}`
+  7. **Audience-scoped cross-host** — token issued for host A rejected by host B
+  8. **Cross-tenant rejection** — wrong `tid` rejected with **zero** state store reads
+  9. **Upstream token encryption** — `EphemeralDataProtectionProvider`-backed unit tests cover round-trip preservation, ciphertext-not-equal-to-plaintext, single-byte-flip tamper detection, truncation rejection, cross-key-ring rejection, and stable purpose string. Plus a state-store-level test asserting every upstream write and read invokes the protector.
+  10. **id_token JWKS validation** — happy path (correct signature, issuer, audience, unexpired) accepted; wrong signing key, wrong issuer, wrong audience, and expired tokens all rejected with the typed `IdTokenValidationException`. Discovery-fetch failures also surface as the typed exception.
+
+### Changed
+
+- **`webhookAuthorizationLevel`** → `anonymous` in `host.json`. The MCP extension's implicit system key is no longer the gate; the JWT middleware is. Attempting to replay a v1.5 function key at v1.6 returns 401.
+- **`DocumentTools.cs`**: **unchanged**. `GetCallerIdentity` already read `ClaimsPrincipal` from `FunctionContext.Features`; v1.6 just populates that feature with real identity instead of leaving it empty.
+- **`Program.cs`**: startup fail-fast on all required OAuth config (`OAuth:BaseUrl`, `OAuth:JwtSigningSecret`, `OAuth:EntraTenantId`, `OAuth:EntraClientId`, `OAuth:EntraClientSecret`, `CosmosDb:AccountEndpoint`). Tenant ID must parse as a GUID. Missing values throw before the host starts.
+- **`infra/main.bicep`**: new `oauth_state` Cosmos container, new Key Vault with both role assignments, new `dataprotection-keys` blob container on the existing storage account, new Key Vault key (`data-protection-key`) for wrapping the DP key ring, new OAuth + Data Protection app settings (double-underscore form for Linux hosting: `OAuth__*`, `KeyVault__Name`, `CosmosDb__OAuthContainerName`, `DataProtection__BlobUri`, `DataProtection__KeyVaultKeyUri`).
+- **`DevBrain.Functions.csproj`** `<Version>` bumped to `1.6.0`. Added `Microsoft.IdentityModel.JsonWebTokens 8.3.0`, `Microsoft.IdentityModel.Protocols.OpenIdConnect 8.3.0`, `Microsoft.AspNetCore.DataProtection 10.0.0`, `Azure.Extensions.AspNetCore.DataProtection.Blobs 1.5.0`, `Azure.Extensions.AspNetCore.DataProtection.Keys 1.5.0`.
+- **`host.json`** `serverVersion` bumped to `1.6.0`.
+
+### Notes
+
+- **JWT signing intentionally uses a plain Key Vault HMAC secret, not Data Protection.** Data Protection's API is Protect/Unprotect — it is *not* appropriate for HMAC signing key derivation. JWT signing reads `OAuth__JwtSigningSecret` (a Key Vault reference) directly as HMAC material. Data Protection is reserved exclusively for upstream token encryption (`DevBrain.OAuth.UpstreamToken` purpose). Both still depend on the same Key Vault — one KV dependency covers both concerns — but they use different secret surfaces inside it.
+- **Single-tenant is a permanent non-goal, not a deferral.** If a SaaS-style multi-tenant DevBrain ever exists, it is a fork under a different name in a different repo — not a DevBrain v2. The code leans on this: `OAuth__EntraTenantId` is hard-required, the authority URL is a baked constant, the JWT issuer stamps `tid` into every token, the middleware validates `tid` before any store lookup, and the Entra app manifest must be single-tenant (`AzureADMyOrg`).
+- **FastMCP OAuthProxy architecture inspired this but we avoided the two bugs they shipped:** CVE-2025-69196 (audience must be the webhook URL, not the base URL — see gate #1) and issue #1713 (client PKCE must not be forwarded upstream — see the independent `AuthTransaction.UpstreamPkceVerifier` / `ClientCodeChallenge` pair).
+- **Consent screen** is deferred to `sprint:devbrain-v1.7-consent-screen`. The `consent:{client_id}:{user_oid}` Cosmos key shape is reserved. With single-tenant Entra as a permanent non-goal, the confused-deputy threat model essentially evaporates as long as DevBrain is deployed by the org that owns the tenant — v1.7's existence is now contingent on a future change in deployment posture (e.g., publishing DevBrain as a turnkey OSS artifact other orgs deploy), not on multi-tenancy.
+
 ## [1.5.0] — 2026-04-10
 
 Three new write primitives — `DeleteDocument`, `AppendDocument`, `UpsertDocumentChunked` — plus key-hygiene enforcement on the write path. Additive, no breaking API changes.
