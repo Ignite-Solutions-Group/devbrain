@@ -119,7 +119,7 @@ codex mcp add devbrain --transport http https://<FUNCTION_URL>/runtime/webhooks/
 
 ### VS Code / GitHub Copilot
 
-⚠️ **Known issue:** The VS Code MCP extension connects successfully and discovers all tools, but does not trigger the OAuth flow because the initial MCP connection returns 200 (unauthenticated tool listing is allowed per the MCP spec). Tool calls then fail with a missing token. This is a client-side limitation — the extension should proactively check `/.well-known/oauth-protected-resource` before assuming auth is unnecessary. Tracking as a known limitation pending a fix in the VS Code MCP extension.
+⚠️ **Known issue:** The VS Code MCP extension connects successfully and discovers all tools, but does not trigger the OAuth flow. See [Known Limitations](#vs-code--github-copilot-mcp-extension--oauth-not-triggered) below for the full explanation and fix paths.
 
 ### Cursor
 
@@ -230,7 +230,6 @@ Every write operation records the authenticated user's Entra UPN in the `updated
 
 ### VS Code / GitHub Copilot MCP extension — OAuth not triggered
 
-<<<<<<< HEAD
 VS Code connects to the MCP endpoint, gets a 200 OK on `tools/list`, discovers all 7 tools, and proceeds as if no auth is required. Tool calls then fail with a missing Bearer token. **VS Code's behavior is correct per the MCP authorization spec** — the spec requires the server to challenge unauthenticated requests with `401 + WWW-Authenticate: Bearer resource_metadata="..."`, at which point the client reads PRM and starts OAuth.
 
 **Why DevBrain returns 200 here:** `initialize` and `tools/list` are handled by the Azure Functions MCP extension at the host process layer and never dispatch a function, so DevBrain's JWT middleware (which runs in the isolated worker) never sees them. The extension assumes Microsoft's documented deployment pattern — App Service Auth in front of the extension, owning the 401 challenge. DevBrain can't use that pattern because enabling App Service Auth with Entra would make the PRM advertise `login.microsoftonline.com` as the authorization server, which Claude.ai web ignores ([anthropics/claude-ai-mcp#82](https://github.com/anthropics/claude-ai-mcp/issues/82)), breaking a client that currently works.
@@ -246,14 +245,6 @@ Other clients work because they probe PRM proactively rather than waiting to be 
 
 ### Client compatibility (v1.6.0)
 
-=======
-The VS Code MCP extension connects to the server, receives a 200 OK on the initial Streamable HTTP handshake (which is correct per the MCP spec — tool listing is unauthenticated), and assumes no auth is needed. It discovers all 7 tools but fails on tool calls with a missing Bearer token. The extension should proactively check for `/.well-known/oauth-protected-resource` and initiate OAuth before assuming anonymous access is sufficient. This is a client-side issue.
-
-**Workaround:** None currently. Wait for a VS Code MCP extension update that handles the PRM-first OAuth discovery pattern.
-
-### Client compatibility (v1.6.0)
-
->>>>>>> 583ac194ff898a1a516bc978a2a51731a5d9e1b4
 | Client | Platform | Auth | Status |
 |--------|----------|------|--------|
 | Claude Code CLI | Windows Terminal | OAuth (DCR) | ✅ Working |
@@ -265,11 +256,7 @@ The VS Code MCP extension connects to the server, receives a 200 OK on the initi
 | Codex CLI | Windows Terminal | OAuth (DCR) | ✅ Working |
 | Codex CLI | WSL | OAuth (DCR) | ✅ Working |
 | VS Code / GitHub Copilot | Windows | OAuth (DCR) | ⚠️ [See above](#vs-code--github-copilot-mcp-extension--oauth-not-triggered) |
-<<<<<<< HEAD
-| ChatGPT | — | — | ❌ MCP not supported |
-=======
 | ChatGPT | Custom connector | OAuth (DCR) | Not tested |
->>>>>>> 583ac194ff898a1a516bc978a2a51731a5d9e1b4
 | Cursor | — | OAuth (DCR) | Not tested |
 
 ## Contributing
