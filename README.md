@@ -256,7 +256,7 @@ Other clients work because they probe PRM proactively rather than waiting to be 
 | Codex CLI | Windows Terminal | OAuth (DCR) | ✅ Working |
 | Codex CLI | WSL | OAuth (DCR) | ✅ Working |
 | VS Code / GitHub Copilot | Windows | OAuth (DCR) | ⚠️ [See above](#vs-code--github-copilot-mcp-extension--oauth-not-triggered) |
-| ChatGPT | Custom connector | OAuth (DCR) | Not tested |
+| ChatGPT | — | — | ❌ MCP not supported |
 | Cursor | — | OAuth (DCR) | Not tested |
 
 ## Contributing
