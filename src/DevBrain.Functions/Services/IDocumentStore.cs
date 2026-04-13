@@ -10,6 +10,13 @@ public interface IDocumentStore
     Task<IReadOnlyList<BrainDocument>> SearchAsync(string query, string project);
 
     /// <summary>
+    /// Returns document metadata (key, project, tags, timestamps, contentHash,
+    /// contentLength) without the content body. Returns null when the document
+    /// does not exist. Cheap on both RU cost and caller token budget.
+    /// </summary>
+    Task<BrainDocument?> GetMetadataAsync(string key, string project);
+
+    /// <summary>
     /// Deletes a single document by key within a project. Idempotent: returns false
     /// when the document does not exist. Accepts both colon and slash keys to support
     /// cleanup of legacy slash-keyed documents.
