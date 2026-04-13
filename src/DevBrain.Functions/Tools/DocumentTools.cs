@@ -97,13 +97,13 @@ public sealed class DocumentTools
 
         return JsonSerializer.Serialize(new
         {
-            document.Key,
-            document.Project,
-            document.Tags,
-            document.UpdatedAt,
-            document.UpdatedBy,
-            document.ContentHash,
-            document.ContentLength
+            key = document.Key,
+            project = document.Project,
+            tags = document.Tags,
+            updatedAt = document.UpdatedAt,
+            updatedBy = document.UpdatedBy,
+            contentHash = document.ContentHash,
+            contentLength = document.ContentLength
         });
     }
 
@@ -154,8 +154,8 @@ public sealed class DocumentTools
             storedContentHash = document.ContentHash,
             storedContentLength = document.ContentLength,
             candidateHash,
-            document.UpdatedAt,
-            document.UpdatedBy
+            updatedAt = document.UpdatedAt,
+            updatedBy = document.UpdatedBy
         });
     }
 
@@ -174,17 +174,17 @@ public sealed class DocumentTools
         {
             return JsonSerializer.Serialize(new[]
             {
-                new { documents[0].Key, documents[0].Content }
+                new { key = documents[0].Key, content = documents[0].Content }
             });
         }
 
         var projection = documents.Select(d => new
         {
-            d.Key,
-            d.Tags,
-            d.UpdatedAt,
-            d.UpdatedBy,
-            d.Project
+            key = d.Key,
+            tags = d.Tags,
+            updatedAt = d.UpdatedAt,
+            updatedBy = d.UpdatedBy,
+            project = d.Project
         });
 
         return JsonSerializer.Serialize(projection);
@@ -258,12 +258,13 @@ public sealed class DocumentTools
 
             return JsonSerializer.Serialize(new
             {
-                saved.Key,
-                saved.Project,
-                saved.Tags,
-                saved.UpdatedAt,
-                saved.UpdatedBy,
-                ContentLength = saved.Content.Length
+                key = saved.Key,
+                project = saved.Project,
+                tags = saved.Tags,
+                updatedAt = saved.UpdatedAt,
+                updatedBy = saved.UpdatedBy,
+                contentHash = saved.ContentHash,
+                contentLength = saved.Content.Length
             });
         }
         catch (Exception ex)
@@ -329,17 +330,18 @@ public sealed class DocumentTools
             {
                 key,
                 project = resolvedProject,
-                result.Status,
-                result.ChunksReceived,
-                result.TotalChunks,
-                Document = result.Document is null ? null : new
+                status = result.Status,
+                chunksReceived = result.ChunksReceived,
+                totalChunks = result.TotalChunks,
+                document = result.Document is null ? null : new
                 {
-                    result.Document.Key,
-                    result.Document.Project,
-                    result.Document.Tags,
-                    result.Document.UpdatedAt,
-                    result.Document.UpdatedBy,
-                    ContentLength = result.Document.Content.Length
+                    key = result.Document.Key,
+                    project = result.Document.Project,
+                    tags = result.Document.Tags,
+                    updatedAt = result.Document.UpdatedAt,
+                    updatedBy = result.Document.UpdatedBy,
+                    contentHash = result.Document.ContentHash,
+                    contentLength = result.Document.Content.Length
                 }
             });
         }
@@ -366,17 +368,17 @@ public sealed class DocumentTools
             {
                 return JsonSerializer.Serialize(new[]
                 {
-                    new { documents[0].Key, documents[0].Content }
+                    new { key = documents[0].Key, content = documents[0].Content }
                 });
             }
 
             var projection = documents.Select(d => new
             {
-                d.Key,
-                d.Tags,
-                d.UpdatedAt,
-                d.Project,
-                ContentExcerpt = d.Content.Length > 300 ? d.Content[..300] + "..." : d.Content
+                key = d.Key,
+                tags = d.Tags,
+                updatedAt = d.UpdatedAt,
+                project = d.Project,
+                contentExcerpt = d.Content.Length > 300 ? d.Content[..300] + "..." : d.Content
             });
 
             return JsonSerializer.Serialize(projection);
