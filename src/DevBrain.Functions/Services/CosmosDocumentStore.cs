@@ -97,6 +97,25 @@ public sealed class CosmosDocumentStore : IDocumentStore
         return null;
     }
 
+    public async Task<int> TouchAllAsync()
+    {
+        var queryDefinition = new QueryDefinition("SELECT * FROM c");
+        var touched = 0;
+
+        using var iterator = _container.GetItemQueryIterator<BrainDocument>(queryDefinition);
+        while (iterator.HasMoreResults)
+        {
+            var response = await iterator.ReadNextAsync();
+            foreach (var document in response)
+            {
+                await UpsertAsync(document);
+                touched++;
+            }
+        }
+
+        return touched;
+    }
+
     public async Task<IReadOnlyList<BrainDocument>> ListAsync(string project, string? prefix = null)
     {
         var queryText = prefix is not null
