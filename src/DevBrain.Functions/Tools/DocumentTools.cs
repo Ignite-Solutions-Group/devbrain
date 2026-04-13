@@ -154,8 +154,8 @@ public sealed class DocumentTools
             storedContentHash = document.ContentHash,
             storedContentLength = document.ContentLength,
             candidateHash,
-            document.UpdatedAt,
-            document.UpdatedBy
+            updatedAt = document.UpdatedAt,
+            updatedBy = document.UpdatedBy
         });
     }
 
