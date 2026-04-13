@@ -2,6 +2,26 @@
 
 All notable changes to DevBrain are tracked in this file. Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] — 2026-04-12
+
+Two new read-only tools that let callers check whether a document has changed without pulling the full content into context. Every write now stamps a SHA-256 `contentHash` and `contentLength` on the document, enabling cheap staleness checks and import-or-skip decisions.
+
+### Added
+- **`GetDocumentMetadata(key, project?)`** — returns key, project, tags, updatedAt, updatedBy, contentHash, and contentLength without the content body. Use to check existence, size, and freshness without consuming tokens or Cosmos RU on the full document.
+- **`CompareDocument(key, content | contentHash, project?)`** — compares candidate content against a stored document. Accepts either raw content (hashed server-side) or a precomputed SHA-256 hex hash. Returns `{ found, match, storedContentHash, candidateHash, ... }`. Use to decide whether an import or sync is needed before committing to a full upsert.
+- **`contentHash` and `contentLength` fields on `BrainDocument`.** Computed server-side on every write (upsert, append, chunked finalize). Nullable — existing documents show `null` until their next write, at which point the fields are populated automatically.
+- **Content normalization for hashing.** Before computing SHA-256, content is normalized: line endings are unified to `\n` (`ReplaceLineEndings`) and trailing whitespace is trimmed. This ensures documents with `\r\n` vs `\n` line endings or trailing newline differences produce identical hashes. The stored content is never modified — normalization only affects hash input.
+
+### Changed
+- **`CosmosDocumentStore.UpsertAsync`** now computes and stores `contentHash` + `contentLength` on every write. Since `AppendAsync` and `UpsertChunkAsync` both flow through `UpsertAsync` for their final write, all write paths are covered with a single touch point.
+- **`IDocumentStore`** gains `GetMetadataAsync(key, project)` — a Cosmos projection query that excludes `c.content`, keeping RU cost and response size low.
+- `host.json` MCP `instructions` updated to mention the two new tools.
+- `host.json` `serverVersion` bumped to `1.7.0`.
+
+### Notes
+- **Backward compatibility.** Existing documents in Cosmos will have `contentHash: null` and `contentLength: null` until their next write. `GetDocumentMetadata` returns these nulls gracefully. `CompareDocument` against a pre-existing doc correctly reports `match: false` (null != any hash), which is the safe default — it triggers a re-import that populates the hash.
+- **Hash normalization is hash-only.** The normalization (line-ending unification + trailing trim) is applied identically in both `CosmosDocumentStore.ComputeSha256` and `DocumentTools.ComputeSha256`, so server-computed hashes and client-precomputed hashes match when the same normalization is applied. Callers providing a precomputed `contentHash` should apply the same normalization for consistent results.
+
 ## [1.6.0] — 2026-04-11
 
 Per-user OAuth replaces the function-key gate. DevBrain now acts as an RFC 7591 Dynamic Client Registration (DCR) facade in front of a single pre-registered Entra app, making it authenticatable from Claude Code CLI, Claude.ai web, VS Code, ChatGPT, and Cursor — all of which previously failed against Entra-direct MCP servers. Writes now record the real Entra UPN as `updatedBy` instead of `"unknown"`.

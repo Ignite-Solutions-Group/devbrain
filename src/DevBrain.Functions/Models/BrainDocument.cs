@@ -22,6 +22,14 @@ public sealed class BrainDocument
     [JsonPropertyName("updatedAt")]
     public DateTimeOffset UpdatedAt { get; set; }
 
+    [JsonPropertyName("contentHash")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ContentHash { get; set; }
+
+    [JsonPropertyName("contentLength")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ContentLength { get; set; }
+
     [JsonPropertyName("updatedBy")]
     public string UpdatedBy { get; set; } = string.Empty;
 
