@@ -17,6 +17,13 @@ public interface IDocumentStore
     Task<BrainDocument?> GetMetadataAsync(string key, string project);
 
     /// <summary>
+    /// Re-upserts every document in the store, triggering server-side metadata
+    /// recomputation (contentHash, contentLength). Returns the number of documents
+    /// touched. Intended as a one-shot backfill after adding new computed fields.
+    /// </summary>
+    Task<int> TouchAllAsync();
+
+    /// <summary>
     /// Deletes a single document by key within a project. Idempotent: returns false
     /// when the document does not exist. Accepts both colon and slash keys to support
     /// cleanup of legacy slash-keyed documents.
