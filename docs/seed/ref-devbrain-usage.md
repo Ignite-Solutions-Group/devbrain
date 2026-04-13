@@ -41,6 +41,33 @@ GetDocument(key: "state:current", project: "devbrain")
 SearchDocuments(query: "durable functions", project: "devbrain")
 ```
 
+## Checking Before Writing — Metadata and Compare
+
+Before importing or syncing a document, check whether the stored version is already up to date. This avoids unnecessary writes and wasted tokens.
+
+### Quick existence and size check
+```
+GetDocumentMetadata(key: "sprint:license-sync", project: "devbrain")
+```
+Returns key, project, tags, updatedAt, updatedBy, contentHash (SHA-256), and contentLength (character count) — **without** the content body. Use this to:
+- Check if a document exists
+- See when it was last updated and by whom
+- Compare content length against your candidate as a fast "obviously different" check
+
+### Confirm content matches before skipping a write
+```
+CompareDocument(key: "sprint:license-sync", content: "...candidate text...", project: "devbrain")
+```
+Returns `{ found, match, storedContentHash, candidateHash, ... }`. The server hashes the candidate content and compares against the stored hash. You can also pass a precomputed `contentHash` instead of raw content.
+
+### Recommended sync workflow
+1. Call `GetDocumentMetadata` — if not found, upsert immediately
+2. If found, compare `contentLength` against your candidate's character count — if obviously different, upsert
+3. If lengths match, call `CompareDocument` with the candidate content — if `match: true`, skip the write
+4. If `match: false`, upsert
+
+This pattern avoids pulling the full stored document into context just to decide whether to write.
+
 ## Key Conventions
 
 Keys use **colon** as the separator. Slash-separated keys (`sprint/foo`) still work for backward compatibility, but colons are the canonical, recommended convention — they signal "DevBrain key" at a glance and avoid being confused with file paths.
