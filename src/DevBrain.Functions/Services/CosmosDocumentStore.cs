@@ -306,15 +306,18 @@ public sealed class CosmosDocumentStore : IDocumentStore
 
             var (existing, etag) = read.Value;
 
+            var mergedContent = existing.Content + separator + content;
             var merged = new BrainDocument
             {
                 Id = existing.Id,
                 Key = existing.Key,
                 Project = existing.Project,
-                Content = existing.Content + separator + content,
+                Content = mergedContent,
                 Tags = UnionTags(existing.Tags, tags),
                 UpdatedAt = DateTimeOffset.UtcNow,
-                UpdatedBy = updatedBy
+                UpdatedBy = updatedBy,
+                ContentHash = ComputeSha256(mergedContent),
+                ContentLength = mergedContent.Length
             };
 
             try
