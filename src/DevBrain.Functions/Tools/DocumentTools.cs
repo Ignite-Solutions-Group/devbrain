@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using DevBrain.Functions.Models;
 using DevBrain.Functions.Services;
@@ -76,6 +78,85 @@ public sealed class DocumentTools
         }
 
         return JsonSerializer.Serialize(document);
+    }
+
+    [Function(nameof(GetDocumentMetadata))]
+    public async Task<string> GetDocumentMetadata(
+        [McpToolTrigger("GetDocumentMetadata", "Retrieve document metadata (key, project, tags, updatedAt, updatedBy, contentHash, contentLength) without the content body. Use to check whether a document exists, its size, and whether it has changed — without consuming tokens on the full content.")]
+            ToolInvocationContext context,
+        [McpToolProperty("key", "Document key to retrieve metadata for.", isRequired: true)]
+            string key,
+        [McpToolProperty("project", "Project scope (default: \"default\").")]
+            string? project)
+    {
+        var document = await _store.GetMetadataAsync(key, project ?? "default");
+        if (document is null)
+        {
+            return $"Document not found: '{key}'";
+        }
+
+        return JsonSerializer.Serialize(new
+        {
+            document.Key,
+            document.Project,
+            document.Tags,
+            document.UpdatedAt,
+            document.UpdatedBy,
+            document.ContentHash,
+            document.ContentLength
+        });
+    }
+
+    [Function(nameof(CompareDocument))]
+    public async Task<string> CompareDocument(
+        [McpToolTrigger("CompareDocument", "Compare candidate content against a stored document without retrieving the full body. Accepts either raw content (hashed server-side) or a precomputed SHA-256 hex hash. Returns whether the stored document matches, plus metadata. Use to decide whether an import or sync is needed.")]
+            ToolInvocationContext context,
+        [McpToolProperty("key", "Document key to compare against.", isRequired: true)]
+            string key,
+        [McpToolProperty("content", "Candidate content to compare. Server computes its SHA-256 hash. Provide this OR contentHash, not both.")]
+            string? content,
+        [McpToolProperty("contentHash", "Precomputed SHA-256 hex hash of the candidate content. Provide this OR content, not both.")]
+            string? contentHash,
+        [McpToolProperty("project", "Project scope (default: \"default\").")]
+            string? project)
+    {
+        if (content is null && contentHash is null)
+        {
+            return "Provide either 'content' or 'contentHash' to compare against.";
+        }
+
+        if (content is not null && contentHash is not null)
+        {
+            return "Provide either 'content' or 'contentHash', not both.";
+        }
+
+        var candidateHash = contentHash ?? ComputeSha256(content!);
+
+        var document = await _store.GetMetadataAsync(key, project ?? "default");
+        if (document is null)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                key,
+                found = false,
+                match = false,
+                message = $"Document not found: '{key}'"
+            });
+        }
+
+        var isMatch = string.Equals(document.ContentHash, candidateHash, StringComparison.OrdinalIgnoreCase);
+
+        return JsonSerializer.Serialize(new
+        {
+            key,
+            found = true,
+            match = isMatch,
+            storedContentHash = document.ContentHash,
+            storedContentLength = document.ContentLength,
+            candidateHash,
+            document.UpdatedAt,
+            document.UpdatedBy
+        });
     }
 
     [Function(nameof(ListDocuments))]
@@ -322,6 +403,13 @@ public sealed class DocumentTools
 
         var suggested = key.Replace('/', ':');
         return $"Keys must use ':' as separator. Got '{key}' — did you mean '{suggested}'?";
+    }
+
+    private static string ComputeSha256(string content)
+    {
+        var normalized = content.ReplaceLineEndings("\n").TrimEnd();
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
+        return Convert.ToHexStringLower(bytes);
     }
 
     private static string GetCallerIdentity(FunctionContext functionContext)

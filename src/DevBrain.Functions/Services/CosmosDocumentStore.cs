@@ -1,4 +1,6 @@
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using DevBrain.Functions.Models;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Configuration;
@@ -33,6 +35,8 @@ public sealed class CosmosDocumentStore : IDocumentStore
     public async Task<BrainDocument> UpsertAsync(BrainDocument document)
     {
         document.Id = EncodeId(document.Key);
+        document.ContentHash = ComputeSha256(document.Content);
+        document.ContentLength = document.Content.Length;
         var response = await _container.UpsertItemAsync(
             document,
             new PartitionKey(document.Key));
@@ -41,6 +45,21 @@ public sealed class CosmosDocumentStore : IDocumentStore
 
     private static string EncodeId(string key) => key.Replace('/', ':');
 
+    private static string ComputeSha256(string content)
+    {
+        var normalized = NormalizeForHash(content);
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
+        return Convert.ToHexStringLower(bytes);
+    }
+
+    /// <summary>
+    /// Normalizes content before hashing so that trivial formatting differences
+    /// (line-ending style, trailing whitespace) don't produce different hashes
+    /// for semantically identical documents. The stored content is never modified.
+    /// </summary>
+    private static string NormalizeForHash(string content) =>
+        content.ReplaceLineEndings("\n").TrimEnd();
+
     public async Task<BrainDocument?> GetAsync(string key, string project)
     {
         // Use a query instead of ReadItemAsync because keys containing forward
@@ -48,6 +67,23 @@ public sealed class CosmosDocumentStore : IDocumentStore
         // by the Cosmos DB REST API point-read endpoint.
         var queryDefinition = new QueryDefinition(
                 "SELECT * FROM c WHERE c.key = @key AND c.project = @project OFFSET 0 LIMIT 1")
+            .WithParameter("@key", key)
+            .WithParameter("@project", project);
+
+        using var iterator = _container.GetItemQueryIterator<BrainDocument>(queryDefinition);
+        if (iterator.HasMoreResults)
+        {
+            var response = await iterator.ReadNextAsync();
+            return response.FirstOrDefault();
+        }
+
+        return null;
+    }
+
+    public async Task<BrainDocument?> GetMetadataAsync(string key, string project)
+    {
+        var queryDefinition = new QueryDefinition(
+                "SELECT c.key, c.project, c.tags, c.updatedAt, c.updatedBy, c.contentHash, c.contentLength FROM c WHERE c.key = @key AND c.project = @project OFFSET 0 LIMIT 1")
             .WithParameter("@key", key)
             .WithParameter("@project", project);
 
