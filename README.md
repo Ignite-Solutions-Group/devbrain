@@ -167,6 +167,8 @@ All tools accept an optional `project` parameter (defaults to `"default"`) to is
 | `AppendDocument` | `key` (required), `content` (required), `separator`, `tags`, `project` | Append content to an existing document (or create it). Server-side concatenation; tag union. |
 | `UpsertDocumentChunked` | `key` (required), `content` (required), `chunkIndex` (required), `totalChunks` (required), `tags`, `project` | Upload a document in multiple chunks when it is too large to emit in a single LLM turn. |
 | `GetDocument` | `key` (required), `project` | Retrieve a document by key |
+| `GetDocumentMetadata` | `key` (required), `project` | Retrieve document metadata (tags, timestamps, contentHash, contentLength) without the content body |
+| `CompareDocument` | `key` (required), `content` or `contentHash` (one required), `project` | Check whether candidate content matches a stored document by SHA-256 hash |
 | `ListDocuments` | `prefix`, `project` | List document keys, optionally filtered by prefix |
 | `SearchDocuments` | `query` (required), `project` | Substring search across keys and content |
 | `DeleteDocument` | `key` (required), `project` | Delete a document by key. Idempotent on missing keys. |
