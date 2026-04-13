@@ -25,7 +25,7 @@ public sealed class AdminFunctions
     /// </summary>
     [Function(nameof(TouchAllDocuments))]
     public async Task<HttpResponseData> TouchAllDocuments(
-        [HttpTrigger(AuthorizationLevel.Admin, "post", Route = "admin/touch")] HttpRequestData req)
+        [HttpTrigger(AuthorizationLevel.Function, "post", Route = "ops/touch")] HttpRequestData req)
     {
         var touched = await _store.TouchAllAsync();
 
