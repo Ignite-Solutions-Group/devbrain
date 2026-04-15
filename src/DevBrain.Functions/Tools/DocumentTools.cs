@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using DevBrain.Functions.Models;
 using DevBrain.Functions.Services;
@@ -11,10 +9,12 @@ namespace DevBrain.Functions.Tools;
 public sealed class DocumentTools
 {
     private readonly IDocumentStore _store;
+    private readonly IDocumentEditService _editService;
 
-    public DocumentTools(IDocumentStore store)
+    public DocumentTools(IDocumentStore store, IDocumentEditService editService)
     {
         _store = store;
+        _editService = editService;
     }
 
     [Function(nameof(UpsertDocument))]
@@ -130,7 +130,7 @@ public sealed class DocumentTools
             return "Provide either 'content' or 'contentHash', not both.";
         }
 
-        var candidateHash = contentHash ?? ComputeSha256(content!);
+        var candidateHash = contentHash ?? ContentHashing.ComputeSha256(content!);
 
         var document = await _store.GetMetadataAsync(key, project ?? "default");
         if (document is null)
@@ -157,6 +157,101 @@ public sealed class DocumentTools
             updatedAt = document.UpdatedAt,
             updatedBy = document.UpdatedBy
         });
+    }
+
+    [Function(nameof(PreviewEditDocument))]
+    public async Task<string> PreviewEditDocument(
+        [McpToolTrigger("PreviewEditDocument", "Preview an exact text edit without writing. Matches literal text only. Returns match count, preview snippets, and the current content hash to pass into ApplyEditDocument.")]
+            ToolInvocationContext context,
+        [McpToolProperty("key", "Document key to edit.", isRequired: true)]
+            string key,
+        [McpToolProperty("oldText", "Exact literal text to find in the document.", isRequired: true)]
+            string oldText,
+        [McpToolProperty("newText", "Replacement text to substitute for oldText. May be empty to delete the match.", isRequired: true)]
+            string newText,
+        [McpToolProperty("expectedOccurrences", "Expected number of literal matches. Defaults to 1; preview refuses ambiguous edits when the actual count differs.")]
+            int? expectedOccurrences,
+        [McpToolProperty("caseSensitive", "When true, matching is case-sensitive. Defaults to false.")]
+            bool? caseSensitive,
+        [McpToolProperty("project", "Project scope (default: \"default\").")]
+            string? project)
+    {
+        if (string.IsNullOrEmpty(oldText))
+        {
+            return JsonSerializer.Serialize(new EditPreviewResult
+            {
+                Key = key,
+                Project = project ?? "default",
+                Found = false,
+                WouldReplace = false,
+                Message = "'oldText' must be a non-empty string."
+            });
+        }
+
+        var result = await _editService.PreviewAsync(
+            key,
+            project ?? "default",
+            oldText,
+            newText,
+            expectedOccurrences ?? 1,
+            caseSensitive ?? false);
+
+        return JsonSerializer.Serialize(result);
+    }
+
+    [Function(nameof(ApplyEditDocument))]
+    public async Task<string> ApplyEditDocument(
+        [McpToolTrigger("ApplyEditDocument", "Apply an exact text edit after preview. Fails if the document changed since preview, if the match count differs, or if the edit is ambiguous. Matches literal text only.")]
+            ToolInvocationContext context,
+        [McpToolProperty("key", "Document key to edit.", isRequired: true)]
+            string key,
+        [McpToolProperty("oldText", "Exact literal text to find in the document.", isRequired: true)]
+            string oldText,
+        [McpToolProperty("newText", "Replacement text to substitute for oldText. May be empty to delete the match.", isRequired: true)]
+            string newText,
+        [McpToolProperty("expectedContentHash", "Content hash returned by PreviewEditDocument. Apply fails if the stored document no longer matches this hash.", isRequired: true)]
+            string expectedContentHash,
+        [McpToolProperty("expectedOccurrences", "Expected number of literal matches. Defaults to 1; apply refuses ambiguous edits when the actual count differs.")]
+            int? expectedOccurrences,
+        [McpToolProperty("caseSensitive", "When true, matching is case-sensitive. Defaults to false.")]
+            bool? caseSensitive,
+        [McpToolProperty("project", "Project scope (default: \"default\").")]
+            string? project,
+        FunctionContext functionContext)
+    {
+        if (string.IsNullOrEmpty(oldText))
+        {
+            return JsonSerializer.Serialize(new EditApplyResult
+            {
+                Key = key,
+                Project = project ?? "default",
+                Applied = false,
+                Message = "'oldText' must be a non-empty string."
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(expectedContentHash))
+        {
+            return JsonSerializer.Serialize(new EditApplyResult
+            {
+                Key = key,
+                Project = project ?? "default",
+                Applied = false,
+                Message = "'expectedContentHash' is required."
+            });
+        }
+
+        var result = await _editService.ApplyAsync(
+            key,
+            project ?? "default",
+            oldText,
+            newText,
+            expectedOccurrences ?? 1,
+            caseSensitive ?? false,
+            expectedContentHash,
+            GetCallerIdentity(functionContext));
+
+        return JsonSerializer.Serialize(result);
     }
 
     [Function(nameof(ListDocuments))]
@@ -405,13 +500,6 @@ public sealed class DocumentTools
 
         var suggested = key.Replace('/', ':');
         return $"Keys must use ':' as separator. Got '{key}' — did you mean '{suggested}'?";
-    }
-
-    private static string ComputeSha256(string content)
-    {
-        var normalized = content.ReplaceLineEndings("\n").TrimEnd();
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
-        return Convert.ToHexStringLower(bytes);
     }
 
     private static string GetCallerIdentity(FunctionContext functionContext)
