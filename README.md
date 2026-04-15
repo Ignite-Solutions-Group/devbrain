@@ -171,6 +171,7 @@ All tools accept an optional `project` parameter (defaults to `"default"`) to is
 | `CompareDocument` | `key` (required), `content` or `contentHash` (one required), `project` | Check whether candidate content matches a stored document by SHA-256 hash |
 | `PreviewEditDocument` | `key` (required), `oldText` (required), `newText` (required), `expectedOccurrences`, `caseSensitive`, `project` | Preview a literal text replacement without writing; returns match count, before/after preview, and the current content hash |
 | `ApplyEditDocument` | `key` (required), `oldText` (required), `newText` (required), `expectedContentHash` (required), `expectedOccurrences`, `caseSensitive`, `project` | Apply a literal text replacement only if the document still matches the preview hash |
+| `EditTags` | `key` (required), `add`, `remove`, `project` | Add and/or remove tags on a document without re-emitting content. A tag in both `add` and `remove` is rejected. |
 | `ListDocuments` | `prefix`, `project` | List document keys, optionally filtered by prefix |
 | `SearchDocuments` | `query` (required), `project` | Substring search across keys and content |
 | `DeleteDocument` | `key` (required), `project` | Delete a document by key. Idempotent on missing keys. |
@@ -209,6 +210,21 @@ ApplyEditDocument(
   expectedContentHash="<hash from preview>"
 )
 ```
+
+### Editing Tags Without Re-Upserting
+
+`EditTags` applies a tag diff to a document, leaving `content` untouched. Pass `add` and/or `remove` as disjoint lists — a tag that appears in both is rejected. Already-present tags in `add` are no-ops; absent tags in `remove` are silently ignored (idempotent). Both lists empty returns a "nothing to do" message without a write.
+
+```text
+EditTags(
+  key="ref:devbrain-usage",
+  project="default",
+  add=["workflow"],
+  remove=["draft"]
+)
+```
+
+Use `EditTags` whenever you only need to adjust tag metadata — it avoids the overhead of sending the entire document body through `UpsertDocument`.
 
 ### When to use Append vs Chunked
 
