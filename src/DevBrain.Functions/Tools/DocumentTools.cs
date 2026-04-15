@@ -10,11 +10,13 @@ public sealed class DocumentTools
 {
     private readonly IDocumentStore _store;
     private readonly IDocumentEditService _editService;
+    private readonly ITagEditService _tagEditService;
 
-    public DocumentTools(IDocumentStore store, IDocumentEditService editService)
+    public DocumentTools(IDocumentStore store, IDocumentEditService editService, ITagEditService tagEditService)
     {
         _store = store;
         _editService = editService;
+        _tagEditService = tagEditService;
     }
 
     [Function(nameof(UpsertDocument))]
@@ -481,6 +483,43 @@ public sealed class DocumentTools
         catch (Exception ex)
         {
             return JsonSerializer.Serialize(new { results = Array.Empty<object>(), message = $"Search failed: {ex.Message}" });
+        }
+    }
+
+    [Function(nameof(EditTags))]
+    public async Task<string> EditTags(
+        [McpToolTrigger("EditTags", "Add and/or remove tags on a document without re-emitting its content. Provide 'add' and/or 'remove' as disjoint tag lists; the server applies the diff and records updatedAt/updatedBy. Document content is untouched. A tag present in both 'add' and 'remove' is rejected.")]
+            ToolInvocationContext context,
+        [McpToolProperty("key", "Document key whose tags to edit.", isRequired: true)]
+            string key,
+        [McpToolProperty("add", "Tags to add. Already-present tags are kept as-is (no duplicates).")]
+            string[]? add,
+        [McpToolProperty("remove", "Tags to remove. Absent tags are ignored (idempotent).")]
+            string[]? remove,
+        [McpToolProperty("project", "Project scope (default: \"default\").")]
+            string? project,
+        FunctionContext functionContext)
+    {
+        var keyError = ValidateWriteKey(key);
+        if (keyError is not null)
+        {
+            return keyError;
+        }
+
+        try
+        {
+            var result = await _tagEditService.EditTagsAsync(
+                key,
+                project ?? "default",
+                add ?? [],
+                remove ?? [],
+                GetCallerIdentity(functionContext));
+
+            return JsonSerializer.Serialize(result);
+        }
+        catch (Exception ex)
+        {
+            return $"Error editing tags: {ex.Message}";
         }
     }
 

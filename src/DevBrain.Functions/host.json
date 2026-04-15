@@ -23,9 +23,9 @@
       "routePrefix": ""
     },
     "mcp": {
-      "instructions": "DevBrain is a developer knowledge store. Use UpsertDocument to save sprint docs, architecture notes, or project state. Use GetDocument to retrieve by key. Use ListDocuments to browse what's stored. Use SearchDocuments to find content by keyword. Use DeleteDocument to remove a document. Use AppendDocument for append-only logs (session history, decision logs) where re-emitting the whole body is wasteful. Use UpsertDocumentChunked when a document is too large to emit in a single turn. Use GetDocumentMetadata to check if a document exists and inspect its size, hash, and timestamps without reading the full content. Use CompareDocument to check whether candidate content matches a stored document (by raw content or SHA-256 hash) before deciding whether to import or update. Keys use colon as separator: state:current, sprint:my-feature, ref:notes. Writes require colon keys.",
+      "instructions": "DevBrain is a developer knowledge store. Use UpsertDocument to save sprint docs, architecture notes, or project state. Use GetDocument to retrieve by key. Use ListDocuments to browse what's stored. Use SearchDocuments to find content by keyword. Use DeleteDocument to remove a document. Use AppendDocument for append-only logs (session history, decision logs) where re-emitting the whole body is wasteful. Use UpsertDocumentChunked when a document is too large to emit in a single turn. Use GetDocumentMetadata to check if a document exists and inspect its size, hash, and timestamps without reading the full content. Use CompareDocument to check whether candidate content matches a stored document (by raw content or SHA-256 hash) before deciding whether to import or update. Use PreviewEditDocument and ApplyEditDocument to make safe exact-text edits without re-emitting the whole document. Use EditTags to add and/or remove tags on a document without re-emitting its content. Keys use colon as separator: state:current, sprint:my-feature, ref:notes. Writes require colon keys.",
       "serverName": "DevBrain",
-      "serverVersion": "1.7.0",
+      "serverVersion": "1.9.0",
       "system": {
         "webhookAuthorizationLevel": "anonymous"
       }
