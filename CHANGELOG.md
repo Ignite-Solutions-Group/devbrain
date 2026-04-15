@@ -2,6 +2,25 @@
 
 All notable changes to DevBrain are tracked in this file. Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] — 2026-04-15
+
+A new `EditTags` tool lets callers adjust tag metadata on an existing document without re-emitting its content. Previously the only way to add or drop a tag was a full `UpsertDocument` round-trip that re-sent the entire body — wasteful for large documents whose content isn't changing.
+
+### Added
+- **`EditTags(key, add?, remove?, project?)`** — applies a tag diff to an existing document. `add` and `remove` are disjoint lists; a tag present in both is rejected. Already-present tags in `add` are no-ops; absent tags in `remove` are silently ignored (idempotent). Content is never touched — the call updates `tags`, `updatedAt`, and `updatedBy` only. Empty `add` and `remove` returns a "nothing to do" response without a write. A no-effective-change result (e.g. adding a tag that's already present) also short-circuits without a write.
+- **`ITagEditService` + `TagEditService`** — encapsulates tag-diff computation, conflict detection, and the write decision. Mirrors the `DocumentEditService` pattern so tag edits are unit-testable against a fake store without touching Cosmos.
+- **`TagEditResult`** — structured response with `Found`, `Changed`, `PreviousTags`, `Tags`, `Added`, `Removed`, `UpdatedAt`, `UpdatedBy`, and a human-readable `Message`. `Added`/`Removed` reflect the tags that actually changed, not the raw input lists — so idempotent no-ops are visible to the caller.
+
+### Changed
+- `README.md` now documents the new `EditTags` tool and the "edit tags without re-upserting" workflow.
+- `docs/seed/ref-devbrain-usage.md` now teaches AI callers when and how to use `EditTags` in place of a full upsert for tag-only changes.
+- `host.json` MCP `instructions` updated to mention `EditTags`.
+- `host.json` `serverVersion` and `DevBrain.Functions.csproj` `<Version>` bumped to `1.9.0`. (Note: both files had drifted at `1.7.0` through the 1.8.0 release — this bump catches them up.)
+
+### Notes
+- **Concurrency.** `EditTags` uses a read-then-upsert path rather than a hash-guarded conditional write. A concurrent tag edit between the read and write could be clobbered. This matches the existing `UpsertDocument` concurrency posture and is acceptable for tag metadata in DevBrain's single-tenant deployment. If stronger guarantees are ever needed, the path can be promoted to `ReplaceIfHashMatchesAsync` without changing the tool surface.
+- **Input normalization.** Blank / whitespace-only tags in `add` or `remove` are dropped before diffing. Duplicates within a single list are deduplicated. Tag comparison is ordinal (case-sensitive) — `"Draft"` and `"draft"` are distinct tags.
+
 ## [1.8.0] — 2026-04-14
 
 Two new document-editing tools add a safe preview/apply workflow for exact text replacements. This keeps DevBrain's whole-document storage model intact while giving AI callers a deterministic way to edit without stale overwrites.

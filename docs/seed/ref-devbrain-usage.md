@@ -108,6 +108,29 @@ If the document changed after preview, apply refuses the write and tells you to 
 - Use `caseSensitive: true` when casing matters and you want to avoid accidental matches
 - Use `UpsertDocument` when you are replacing the whole document on purpose; use preview/apply when you want a narrow, literal patch
 
+## Editing Tags Without Re-Upserting
+
+To adjust tag metadata on an existing document, use `EditTags` instead of re-sending the full content through `UpsertDocument`.
+
+### Add and/or remove tags in one call
+```
+EditTags(
+  key: "ref:devbrain-usage",
+  project: "default",
+  add: ["workflow"],
+  remove: ["draft"]
+)
+```
+
+The server applies the diff:
+- Tags in `add` that are already present are no-ops
+- Tags in `remove` that are absent are ignored (idempotent)
+- A tag that appears in both `add` and `remove` is rejected — the call fails without writing
+- If `add` and `remove` are both empty, nothing is written
+- If the resulting tag set is identical to the current one, nothing is written
+
+`EditTags` never modifies the document `content`. It touches `tags`, `updatedAt`, and `updatedBy` only. Use this whenever you just need to label or un-label an existing document — it's dramatically cheaper than an `UpsertDocument` that has to re-emit the whole body.
+
 ## Key Conventions
 
 Keys use **colon** as the separator. Slash-separated keys (`sprint/foo`) still work for backward compatibility, but colons are the canonical, recommended convention — they signal "DevBrain key" at a glance and avoid being confused with file paths.
