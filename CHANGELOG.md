@@ -2,6 +2,21 @@
 
 All notable changes to DevBrain are tracked in this file. Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Two new document-editing tools add a safe preview/apply workflow for exact text replacements. This keeps DevBrain's whole-document storage model intact while giving AI callers a deterministic way to edit without stale overwrites.
+
+### Added
+- **`PreviewEditDocument(key, oldText, newText, expectedOccurrences?, caseSensitive?, project?)`** — previews a literal text replacement without writing. Returns match count, before/after snippets, and the current `contentHash` for the caller to feed into apply.
+- **`ApplyEditDocument(key, oldText, newText, expectedContentHash, expectedOccurrences?, caseSensitive?, project?)`** — applies the same literal replacement only if the stored document still matches the preview hash. Refuses ambiguous or stale edits.
+- **`DocumentEditService`** — shared edit-planning/execution layer that finds literal matches, builds preview snippets, and computes the final whole-document replacement payload.
+- **`ConditionalWriteResult` + `IDocumentStore.ReplaceIfHashMatchesAsync(...)`** — conditional write path used by apply to avoid overwriting a document that changed after preview.
+- **`ContentHashing` helper** — centralizes content-hash computation and normalization so compare/edit flows share the same hash semantics.
+
+### Changed
+- `README.md` now documents the new edit tools and the recommended preview/apply workflow.
+- `docs/seed/ref-devbrain-usage.md` now teaches AI callers how to edit existing documents safely using `PreviewEditDocument` followed by `ApplyEditDocument`.
+
 ## [1.7.0] — 2026-04-12
 
 Two new read-only tools that let callers check whether a document has changed without pulling the full content into context. Every write now stamps a SHA-256 `contentHash` and `contentLength` on the document, enabling cheap staleness checks and import-or-skip decisions.

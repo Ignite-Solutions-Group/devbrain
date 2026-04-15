@@ -68,6 +68,49 @@ Returns `{ found, match, storedContentHash, candidateHash, ... }`. The server ha
 
 This pattern avoids pulling the full stored document into context just to decide whether to write.
 
+## Editing Existing Documents Safely
+
+For targeted text changes, use the two-step edit flow instead of guessing and overwriting:
+
+### Preview the edit first
+```
+PreviewEditDocument(
+  key: "state:current",
+  project: "devbrain",
+  oldText: "Status: draft",
+  newText: "Status: in progress"
+)
+```
+
+Returns:
+- `matchCount` — how many literal matches were found
+- `previewBefore` / `previewAfter` — short context snippets
+- `currentContentHash` — pass this into `ApplyEditDocument`
+- `wouldReplace` / `ambiguous` — whether the edit is safe to apply as requested
+
+### Apply only if the document is unchanged
+```
+ApplyEditDocument(
+  key: "state:current",
+  project: "devbrain",
+  oldText: "Status: draft",
+  newText: "Status: in progress",
+  expectedContentHash: "<hash returned by preview>"
+)
+```
+
+### Recommended edit workflow
+1. Call `PreviewEditDocument`
+2. Check `matchCount` — if it differs from what you expected, stop and revise the edit
+3. Use the returned `currentContentHash` as `expectedContentHash` in `ApplyEditDocument`
+4. If apply says the document changed since preview, rerun preview instead of forcing the write
+
+### Important limits
+- Matching is **literal text only** — no regex support
+- `expectedOccurrences` defaults to `1`, which is the safe default for most agent edits
+- Apply will refuse stale writes when the document changed after preview
+- The final write is still a whole-document replace internally; the preview/apply flow just makes it safe
+
 ## Key Conventions
 
 Keys use **colon** as the separator. Slash-separated keys (`sprint/foo`) still work for backward compatibility, but colons are the canonical, recommended convention — they signal "DevBrain key" at a glance and avoid being confused with file paths.
