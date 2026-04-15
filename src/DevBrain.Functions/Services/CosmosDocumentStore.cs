@@ -1,6 +1,4 @@
 using System.Net;
-using System.Security.Cryptography;
-using System.Text;
 using DevBrain.Functions.Models;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Configuration;
@@ -35,7 +33,7 @@ public sealed class CosmosDocumentStore : IDocumentStore
     public async Task<BrainDocument> UpsertAsync(BrainDocument document)
     {
         document.Id = EncodeId(document.Key);
-        document.ContentHash = ComputeSha256(document.Content);
+        document.ContentHash = ContentHashing.ComputeSha256(document.Content);
         document.ContentLength = document.Content.Length;
         var response = await _container.UpsertItemAsync(
             document,
@@ -45,20 +43,88 @@ public sealed class CosmosDocumentStore : IDocumentStore
 
     private static string EncodeId(string key) => key.Replace('/', ':');
 
-    private static string ComputeSha256(string content)
+    public async Task<ConditionalWriteResult> ReplaceIfHashMatchesAsync(BrainDocument document, string expectedContentHash)
     {
-        var normalized = NormalizeForHash(content);
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
-        return Convert.ToHexStringLower(bytes);
-    }
+        var queryDefinition = new QueryDefinition(
+                "SELECT * FROM c WHERE c.key = @key AND c.project = @project OFFSET 0 LIMIT 1")
+            .WithParameter("@key", document.Key)
+            .WithParameter("@project", document.Project);
 
-    /// <summary>
-    /// Normalizes content before hashing so that trivial formatting differences
-    /// (line-ending style, trailing whitespace) don't produce different hashes
-    /// for semantically identical documents. The stored content is never modified.
-    /// </summary>
-    private static string NormalizeForHash(string content) =>
-        content.ReplaceLineEndings("\n").TrimEnd();
+        using var iterator = _container.GetItemQueryIterator<BrainDocument>(queryDefinition);
+        if (!iterator.HasMoreResults)
+        {
+            return new ConditionalWriteResult(
+                Applied: false,
+                CurrentContentHash: null,
+                Document: null,
+                Message: $"Document not found: '{document.Key}'");
+        }
+
+        var response = await iterator.ReadNextAsync();
+        var existing = response.FirstOrDefault();
+        if (existing is null)
+        {
+            return new ConditionalWriteResult(
+                Applied: false,
+                CurrentContentHash: null,
+                Document: null,
+                Message: $"Document not found: '{document.Key}'");
+        }
+
+        ItemResponse<BrainDocument> currentResponse;
+        try
+        {
+            currentResponse = await _container.ReadItemAsync<BrainDocument>(
+                existing.Id,
+                new PartitionKey(existing.Key));
+        }
+        catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            return new ConditionalWriteResult(
+                Applied: false,
+                CurrentContentHash: null,
+                Document: null,
+                Message: $"Document not found: '{document.Key}'");
+        }
+
+        existing = currentResponse.Resource;
+        var currentHash = existing.ContentHash ?? ContentHashing.ComputeSha256(existing.Content);
+        if (!string.Equals(currentHash, expectedContentHash, StringComparison.OrdinalIgnoreCase))
+        {
+            return new ConditionalWriteResult(
+                Applied: false,
+                CurrentContentHash: currentHash,
+                Document: existing,
+                Message: "Document changed since preview. Re-run PreviewEditDocument and try again.");
+        }
+
+        document.Id = existing.Id;
+        document.ContentHash = ContentHashing.ComputeSha256(document.Content);
+        document.ContentLength = document.Content.Length;
+
+        try
+        {
+            var replaceResponse = await _container.ReplaceItemAsync(
+                document,
+                existing.Id,
+                new PartitionKey(existing.Key),
+                new ItemRequestOptions { IfMatchEtag = currentResponse.ETag });
+
+            return new ConditionalWriteResult(
+                Applied: true,
+                CurrentContentHash: currentHash,
+                Document: replaceResponse.Resource,
+                Message: "Write applied.");
+        }
+        catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.PreconditionFailed)
+        {
+            return new ConditionalWriteResult(
+                Applied: false,
+                CurrentContentHash: currentHash,
+                Document: null,
+                Message: "Document changed during apply. Re-run PreviewEditDocument and try again.");
+        }
+    }
 
     public async Task<BrainDocument?> GetAsync(string key, string project)
     {
@@ -316,7 +382,7 @@ public sealed class CosmosDocumentStore : IDocumentStore
                 Tags = UnionTags(existing.Tags, tags),
                 UpdatedAt = DateTimeOffset.UtcNow,
                 UpdatedBy = updatedBy,
-                ContentHash = ComputeSha256(mergedContent),
+                ContentHash = ContentHashing.ComputeSha256(mergedContent),
                 ContentLength = mergedContent.Length
             };
 
