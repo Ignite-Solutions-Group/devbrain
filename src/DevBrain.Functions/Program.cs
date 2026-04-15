@@ -73,6 +73,7 @@ builder.Services.AddSingleton(sp =>
 
 builder.Services.AddSingleton<IDocumentStore, CosmosDocumentStore>();
 builder.Services.AddSingleton<IDocumentEditService, DocumentEditService>();
+builder.Services.AddSingleton<ITagEditService, TagEditService>();
 
 // ---------------- OAuth DCR facade (v1.6) ----------------
 
