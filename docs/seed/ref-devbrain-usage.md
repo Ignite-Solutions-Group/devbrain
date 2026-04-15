@@ -4,7 +4,7 @@
 
 DevBrain organizes documents by project. If a query returns no results, you are likely searching the wrong project scope.
 
-**Always specify the project parameter explicitly.** The default project ("default") is empty for most use cases.
+**Always specify the project parameter explicitly.** Use `default` for shared reference docs or quick sandboxing, and use named projects like `devbrain` for real project state.
 
 ## Known Projects
 - `devbrain` — DevBrain's own documentation, architecture, sprint docs, backlog, known issues
@@ -68,48 +68,45 @@ Returns `{ found, match, storedContentHash, candidateHash, ... }`. The server ha
 
 This pattern avoids pulling the full stored document into context just to decide whether to write.
 
-## Editing Existing Documents Safely
+## Editing Existing Documents Safely — Preview and Apply
 
-For targeted text changes, use the two-step edit flow instead of guessing and overwriting:
+For exact text edits, use the guarded two-step flow instead of doing a blind full overwrite.
 
-### Preview the edit first
+### Preview an exact edit first
 ```
 PreviewEditDocument(
-  key: "state:current",
-  project: "devbrain",
-  oldText: "Status: draft",
-  newText: "Status: in progress"
+  key: "ref:devbrain-usage",
+  oldText: "old phrase",
+  newText: "new phrase",
+  project: "default",
+  expectedOccurrences: 1
 )
 ```
+Preview returns whether the edit is possible, how many matches were found, whether the request is ambiguous, and the current `contentHash` to use when applying.
 
-Returns:
-- `matchCount` — how many literal matches were found
-- `previewBefore` / `previewAfter` — short context snippets
-- `currentContentHash` — pass this into `ApplyEditDocument`
-- `wouldReplace` / `ambiguous` — whether the edit is safe to apply as requested
-
-### Apply only if the document is unchanged
+### Apply only against the previewed version
 ```
 ApplyEditDocument(
-  key: "state:current",
-  project: "devbrain",
-  oldText: "Status: draft",
-  newText: "Status: in progress",
-  expectedContentHash: "<hash returned by preview>"
+  key: "ref:devbrain-usage",
+  oldText: "old phrase",
+  newText: "new phrase",
+  project: "default",
+  expectedOccurrences: 1,
+  expectedContentHash: "<hash from preview>"
 )
 ```
+If the document changed after preview, apply refuses the write and tells you to preview again.
 
 ### Recommended edit workflow
 1. Call `PreviewEditDocument`
-2. Check `matchCount` — if it differs from what you expected, stop and revise the edit
-3. Use the returned `currentContentHash` as `expectedContentHash` in `ApplyEditDocument`
-4. If apply says the document changed since preview, rerun preview instead of forcing the write
+2. Confirm `WouldReplace: true` and the `MatchCount` is what you expected
+3. Pass the returned `CurrentContentHash` into `ApplyEditDocument`
+4. If apply reports that the document changed since preview, re-run preview and try again
 
-### Important limits
-- Matching is **literal text only** — no regex support
-- `expectedOccurrences` defaults to `1`, which is the safe default for most agent edits
-- Apply will refuse stale writes when the document changed after preview
-- The final write is still a whole-document replace internally; the preview/apply flow just makes it safe
+### Useful guardrails
+- Use `expectedOccurrences` to refuse zero-match or multi-match edits unless they are intentional
+- Use `caseSensitive: true` when casing matters and you want to avoid accidental matches
+- Use `UpsertDocument` when you are replacing the whole document on purpose; use preview/apply when you want a narrow, literal patch
 
 ## Key Conventions
 
