@@ -4,7 +4,7 @@
 
 DevBrain organizes documents by project. If a query returns no results, you are likely searching the wrong project scope.
 
-**Always specify the project parameter explicitly.** The default project ("default") is empty for most use cases.
+**Always specify the project parameter explicitly.** Use `default` for shared reference docs or quick sandboxing, and use named projects like `devbrain` for real project state.
 
 ## Known Projects
 - `devbrain` — DevBrain's own documentation, architecture, sprint docs, backlog, known issues
@@ -67,6 +67,46 @@ Returns `{ found, match, storedContentHash, candidateHash, ... }`. The server ha
 4. If `match: false`, upsert
 
 This pattern avoids pulling the full stored document into context just to decide whether to write.
+
+## Editing Existing Documents Safely — Preview and Apply
+
+For exact text edits, use the guarded two-step flow instead of doing a blind full overwrite.
+
+### Preview an exact edit first
+```
+PreviewEditDocument(
+  key: "ref:devbrain-usage",
+  oldText: "old phrase",
+  newText: "new phrase",
+  project: "default",
+  expectedOccurrences: 1
+)
+```
+Preview returns whether the edit is possible, how many matches were found, whether the request is ambiguous, and the current `contentHash` to use when applying.
+
+### Apply only against the previewed version
+```
+ApplyEditDocument(
+  key: "ref:devbrain-usage",
+  oldText: "old phrase",
+  newText: "new phrase",
+  project: "default",
+  expectedOccurrences: 1,
+  expectedContentHash: "<hash from preview>"
+)
+```
+If the document changed after preview, apply refuses the write and tells you to preview again.
+
+### Recommended edit workflow
+1. Call `PreviewEditDocument`
+2. Confirm `WouldReplace: true` and the `MatchCount` is what you expected
+3. Pass the returned `CurrentContentHash` into `ApplyEditDocument`
+4. If apply reports that the document changed since preview, re-run preview and try again
+
+### Useful guardrails
+- Use `expectedOccurrences` to refuse zero-match or multi-match edits unless they are intentional
+- Use `caseSensitive: true` when casing matters and you want to avoid accidental matches
+- Use `UpsertDocument` when you are replacing the whole document on purpose; use preview/apply when you want a narrow, literal patch
 
 ## Key Conventions
 

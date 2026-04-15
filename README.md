@@ -169,9 +169,46 @@ All tools accept an optional `project` parameter (defaults to `"default"`) to is
 | `GetDocument` | `key` (required), `project` | Retrieve a document by key |
 | `GetDocumentMetadata` | `key` (required), `project` | Retrieve document metadata (tags, timestamps, contentHash, contentLength) without the content body |
 | `CompareDocument` | `key` (required), `content` or `contentHash` (one required), `project` | Check whether candidate content matches a stored document by SHA-256 hash |
+| `PreviewEditDocument` | `key` (required), `oldText` (required), `newText` (required), `expectedOccurrences`, `caseSensitive`, `project` | Preview a literal text replacement without writing; returns match count, before/after preview, and the current content hash |
+| `ApplyEditDocument` | `key` (required), `oldText` (required), `newText` (required), `expectedContentHash` (required), `expectedOccurrences`, `caseSensitive`, `project` | Apply a literal text replacement only if the document still matches the preview hash |
 | `ListDocuments` | `prefix`, `project` | List document keys, optionally filtered by prefix |
 | `SearchDocuments` | `query` (required), `project` | Substring search across keys and content |
 | `DeleteDocument` | `key` (required), `project` | Delete a document by key. Idempotent on missing keys. |
+
+### Editing Documents Safely
+
+DevBrain still stores documents as whole values, but it now supports a safe two-step edit flow for exact text changes:
+
+1. Call `PreviewEditDocument` with the literal `oldText` and `newText`
+2. Inspect the returned `matchCount`, preview snippets, and `currentContentHash`
+3. Call `ApplyEditDocument` with the same edit inputs and `expectedContentHash`
+
+Why two steps:
+
+- **Ambiguity guard.** Preview refuses edits when the number of matches differs from `expectedOccurrences` (defaults to `1`).
+- **Concurrency guard.** Apply fails if the stored content hash changed after preview, preventing stale overwrites.
+- **Agent-friendly ergonomics.** Exact snippet replacement is more reliable than offsets or regex for most AI callers.
+
+Example:
+
+```text
+PreviewEditDocument(
+  key="state:current",
+  project="devbrain",
+  oldText="Status: draft",
+  newText="Status: in progress"
+)
+```
+
+```text
+ApplyEditDocument(
+  key="state:current",
+  project="devbrain",
+  oldText="Status: draft",
+  newText="Status: in progress",
+  expectedContentHash="<hash from preview>"
+)
+```
 
 ### When to use Append vs Chunked
 
