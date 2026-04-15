@@ -2,7 +2,7 @@
 
 All notable changes to DevBrain are tracked in this file. Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.8.0] — 2026-04-14
 
 Two new document-editing tools add a safe preview/apply workflow for exact text replacements. This keeps DevBrain's whole-document storage model intact while giving AI callers a deterministic way to edit without stale overwrites.
 
