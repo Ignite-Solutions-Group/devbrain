@@ -34,8 +34,15 @@ Thanks for your interest in contributing to DevBrain!
 1. Fork the repository and create a feature branch from `main`.
 2. Make your changes. Keep commits focused and atomic.
 3. Ensure `dotnet build` completes with no warnings (warnings are treated as errors).
-4. Open a pull request against `main` with a clear description of the change.
-5. A maintainer will review and merge once CI passes.
+4. For dependency changes, check the whole solution from the repository root before opening the PR:
+   ```bash
+   dotnet list devbrain.slnx package --vulnerable --include-transitive
+   dotnet list devbrain.slnx package --outdated --highest-patch
+   dotnet list devbrain.slnx package --outdated --include-transitive
+   dotnet list devbrain.slnx package --deprecated
+   ```
+5. Open a pull request against `main` with a clear description of the change.
+6. A maintainer will review and merge once CI passes.
 
 ## Code Style
 

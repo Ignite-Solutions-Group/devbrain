@@ -9,14 +9,14 @@ namespace DevBrain.Functions.Auth.DcrFacade;
 /// <summary>
 /// Service layer for <c>POST /token</c>. Handles both the <c>authorization_code</c> and
 /// <c>refresh_token</c> grant types. Atomicity of code redemption and refresh rotation lives in
-/// <see cref="IOAuthStateStore.RedeemAuthCodeAsync"/> / <see cref="IOAuthStateStore.ConsumeRefreshAsync"/>
+/// <see cref="IOAuthStateStore.RedeemAuthCodeAsync"/> / <see cref="IOAuthStateStore.RotateRefreshAsync"/>
 /// — this handler is responsible for the validation around those two atomic pivots.
 ///
 /// <para>Acceptance gates covered here:</para>
 /// <list type="bullet">
 ///   <item><b>#2 PKCE downgrade</b> — verifier mismatch returns <c>invalid_grant</c>.</item>
 ///   <item><b>#3 Code replay</b> — second redemption returns <c>invalid_grant</c> via the atomic store.</item>
-///   <item><b>#5 Refresh rotation</b> — every refresh grant rotates; the old token is consumed atomically.</item>
+///   <item><b>#5 Refresh rotation</b> — every refresh grant rotates; the old token becomes a short-lived replay marker.</item>
 /// </list>
 /// </summary>
 public sealed class TokenHandler
@@ -27,6 +27,14 @@ public sealed class TokenHandler
 
     // Refresh tokens: 30 days to match the sprint spec. Rotated on every use.
     private static readonly TimeSpan RefreshTokenLifetime = TimeSpan.FromDays(30);
+
+    // Short replay window for clients that retry or restart immediately after a rotation but still
+    // present the just-rotated token from local credential cache.
+    private static readonly TimeSpan RefreshReplayLifetime = TimeSpan.FromMinutes(5);
+
+    // Keep the upstream vault alive for the full local refresh window. CallbackHandler creates the
+    // initial vault record; the refresh path slides it forward on every successful rotation/replay.
+    private static readonly TimeSpan UpstreamVaultTtl = TimeSpan.FromDays(30);
 
     private readonly IOAuthStateStore _store;
     private readonly DevBrainJwtIssuer _jwtIssuer;
@@ -147,34 +155,33 @@ public sealed class TokenHandler
             return TokenResult.Error("invalid_request", "client_id is required.");
         }
 
-        var record = await _store.ConsumeRefreshAsync(request.RefreshToken);
-        if (record is null)
+        var replacementRefresh = GenerateOpaqueToken();
+        var rotation = await _store.RotateRefreshAsync(
+            request.RefreshToken,
+            request.ClientId,
+            replacementRefresh,
+            RefreshTokenLifetime,
+            RefreshReplayLifetime,
+            UpstreamVaultTtl);
+
+        if (rotation is null)
         {
-            _logger?.LogWarning("TokenHandler/refresh: rejected — refresh_token invalid, expired, or already rotated");
-            return TokenResult.Error("invalid_grant", "refresh_token is invalid, expired, or already rotated.");
+            _logger?.LogWarning("TokenHandler/refresh: rejected — refresh_token invalid, expired, wrong client, or upstream session expired");
+            return TokenResult.Error("invalid_grant", "refresh_token is invalid, expired, already rotated outside the replay window, or bound to a different client.");
         }
 
-        if (!string.Equals(record.ClientId, request.ClientId, StringComparison.Ordinal))
-        {
-            _logger?.LogWarning(
-                "TokenHandler/refresh: rejected — client binding mismatch tokenClientId={TokenClientId} requestClientId={RequestClientId}",
-                record.ClientId, request.ClientId);
-            return TokenResult.Error("invalid_grant", "refresh_token was issued to a different client.");
-        }
-
-        var upstreamJti = record.UpstreamJti;
+        var upstreamJti = rotation.UpstreamJti;
         var (jwt, _) = IssueJwtForUpstream(upstreamJti);
-        var newRefresh = await MintAndStoreRefreshAsync(record.ClientId, upstreamJti);
 
         _logger?.LogInformation(
-            "TokenHandler/refresh: rotated refresh clientId={ClientId} upstreamJti={Jti}",
-            record.ClientId, upstreamJti);
+            "TokenHandler/refresh: {RotationKind} refresh clientId={ClientId} upstreamJti={Jti}",
+            rotation.IsReplay ? "replayed" : "rotated", request.ClientId, upstreamJti);
 
         return TokenResult.Success(new TokenResponse(
             AccessToken: jwt,
             TokenType: "Bearer",
             ExpiresIn: (int)AccessTokenLifetime.TotalSeconds,
-            RefreshToken: newRefresh,
+            RefreshToken: rotation.RefreshToken,
             Scope: "documents.readwrite"));
     }
 
