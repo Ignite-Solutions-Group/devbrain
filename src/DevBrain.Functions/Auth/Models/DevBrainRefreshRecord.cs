@@ -4,9 +4,8 @@ namespace DevBrain.Functions.Auth.Models;
 
 /// <summary>
 /// A DevBrain refresh token. Rotated on every use (see
-/// <see cref="Services.IOAuthStateStore.ConsumeRefreshAsync"/>) — FastMCP's rotation pattern,
-/// adopted because a long-lived non-rotating refresh is a meaningfully worse stolen-token story.
-/// Stored in Cosmos under key <c>refresh:{RefreshToken}</c>.
+/// <see cref="Services.IOAuthStateStore.RotateRefreshAsync"/>) with a short replay marker for
+/// idempotent client retries. Stored in Cosmos under key <c>refresh:{RefreshToken}</c>.
 /// </summary>
 public sealed class DevBrainRefreshRecord
 {
@@ -32,6 +31,19 @@ public sealed class DevBrainRefreshRecord
     [JsonPropertyName("expiresAt")]
     public DateTimeOffset ExpiresAt { get; set; }
 
+    /// <summary>
+    /// When set, this record is no longer an active refresh token. It is a short-lived replay
+    /// marker pointing to the replacement token returned by the winning rotation request.
+    /// </summary>
+    [JsonPropertyName("rotatedToRefreshToken")]
+    public string? RotatedToRefreshToken { get; set; }
+
+    [JsonPropertyName("rotatedAt")]
+    public DateTimeOffset? RotatedAt { get; set; }
+
     [JsonPropertyName("ttl")]
     public int Ttl { get; set; }
+
+    [JsonIgnore]
+    public bool IsReplayMarker => !string.IsNullOrEmpty(RotatedToRefreshToken);
 }

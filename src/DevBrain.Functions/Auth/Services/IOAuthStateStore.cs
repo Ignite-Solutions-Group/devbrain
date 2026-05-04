@@ -14,10 +14,9 @@ namespace DevBrain.Functions.Auth.Services;
 ///         the prefixed Cosmos key.</item>
 ///   <item>Expiry is checked defensively against an injected <see cref="TimeProvider"/> on every
 ///         read. Cosmos native TTL is best-effort and not trusted for security decisions.</item>
-///   <item>Two operations are explicitly atomic: <see cref="RedeemAuthCodeAsync"/> and
-///         <see cref="ConsumeRefreshAsync"/>. Concurrent callers are guaranteed that exactly one
-///         receives the record; all others receive <c>null</c>. Implemented via Cosmos ETag
-///         conditional delete.</item>
+///   <item>Auth-code redemption and legacy refresh consumption are single-take operations.
+///         Refresh rotation uses <see cref="RotateRefreshAsync"/> so concurrent client retries can
+///         replay the winning rotation for a short grace window.</item>
 /// </list>
 /// </summary>
 public interface IOAuthStateStore
@@ -60,9 +59,26 @@ public interface IOAuthStateStore
     Task SaveRefreshAsync(DevBrainRefreshRecord refresh);
 
     /// <summary>
+    /// Rotates a refresh token when it is still active and issued to <paramref name="clientId"/>.
+    /// The old refresh token becomes a short-lived replay marker pointing to
+    /// <paramref name="replacementRefreshToken"/>; calls during that window return the same
+    /// replacement token. The referenced upstream vault record is defensively extended as part of
+    /// the rotation/replay path.
+    /// </summary>
+    Task<RefreshRotationResult?> RotateRefreshAsync(
+        string refreshToken,
+        string clientId,
+        string replacementRefreshToken,
+        TimeSpan replacementLifetime,
+        TimeSpan replayLifetime,
+        TimeSpan upstreamVaultLifetime);
+
+    /// <summary>
     /// Atomically consumes a refresh token. Returns the stored record on success.
     /// Returns <c>null</c> if the token does not exist, has expired, or has already been rotated.
     /// Callers are expected to mint a new refresh and <see cref="SaveRefreshAsync"/> it as part of the same operation.
+    /// Legacy primitive retained for low-level store tests; new token endpoint code should use
+    /// <see cref="RotateRefreshAsync"/>.
     /// </summary>
     Task<DevBrainRefreshRecord?> ConsumeRefreshAsync(string refreshToken);
 }
