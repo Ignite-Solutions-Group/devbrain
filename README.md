@@ -117,6 +117,8 @@ OAuth completes automatically — no proxy, no function key, no manual headers.
 codex mcp add devbrain --transport http https://<FUNCTION_URL>/runtime/webhooks/mcp
 ```
 
+DevBrain rotates OAuth refresh tokens on every refresh. To tolerate Codex Windows App/CLI retry or restart races while the local credential cache catches up, DevBrain keeps a short replay window for the just-rotated token and returns the same replacement refresh token during that window.
+
 ### VS Code / GitHub Copilot
 
 ⚠️ **Known issue:** The VS Code MCP extension connects successfully and discovers all tools, but does not trigger the OAuth flow. See [Known Limitations](#vs-code--github-copilot-mcp-extension--oauth-not-triggered) below for the full explanation and fix paths.
@@ -270,6 +272,14 @@ Keys use colon as the separator (e.g. `sprint:license-sync`). **Writes** (`Upser
    func start
    ```
 
+5. Optional dependency health checks from the repository root:
+   ```powershell
+   dotnet list devbrain.slnx package --vulnerable --include-transitive
+   dotnet list devbrain.slnx package --outdated --highest-patch
+   dotnet list devbrain.slnx package --outdated --include-transitive
+   dotnet list devbrain.slnx package --deprecated
+   ```
+
 ## Authentication
 
 DevBrain implements RFC 7591 Dynamic Client Registration (DCR) with an in-process OAuth proxy that brokers a single pre-registered Entra app. From the client's perspective, DevBrain *is* the authorization server. Internally it delegates to your tenant's Entra ID for user authentication.
@@ -280,6 +290,10 @@ This solves two problems that previously blocked MCP OAuth:
 2. **Claude.ai ignores external IdP endpoints in discovery metadata** — DevBrain hosts its own `/.well-known/oauth-authorization-server` and `/.well-known/oauth-protected-resource` on its own domain.
 
 Every write operation records the authenticated user's Entra UPN in the `updatedBy` field.
+
+### Refresh Token Rotation
+
+Access tokens are short-lived and DevBrain refresh tokens rotate on every refresh. The old refresh token becomes a five-minute replay marker that points at the replacement token, which makes immediate MCP client retries idempotent without reopening the OAuth flow. Replays outside that window still fail with `invalid_grant`, and every successful refresh or replay extends the upstream token vault record for the same local refresh window.
 
 ## Known Limitations
 
