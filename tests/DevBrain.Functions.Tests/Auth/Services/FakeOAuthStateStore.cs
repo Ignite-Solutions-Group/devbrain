@@ -9,8 +9,9 @@ namespace DevBrain.Functions.Tests.Auth.Services;
 /// <see cref="CosmosOAuthStateStore"/>:
 /// <list type="bullet">
 ///   <item>Defensive expiry check on every read using the injected <see cref="TimeProvider"/> (typically a <c>FakeTimeProvider</c>).</item>
-///   <item><see cref="RedeemAuthCodeAsync"/> and <see cref="ConsumeRefreshAsync"/> are single-take under a lock —
-///         concurrent callers get the record at most once.</item>
+///   <item><see cref="RedeemAuthCodeAsync"/> is single-take under a lock.</item>
+///   <item><see cref="RotateRefreshAsync"/> leaves a short-lived replay marker so immediate
+///         retries see the winning replacement token.</item>
 /// </list>
 ///
 /// <para>
@@ -241,9 +242,94 @@ public sealed class FakeOAuthStateStore : IOAuthStateStore
         }
     }
 
+    public Task<RefreshRotationResult?> RotateRefreshAsync(
+        string refreshToken,
+        string clientId,
+        string replacementRefreshToken,
+        TimeSpan replacementLifetime,
+        TimeSpan replayLifetime,
+        TimeSpan upstreamVaultLifetime)
+    {
+        lock (_lock)
+        {
+            ReadCallCount++;
+            if (!_refreshes.TryGetValue(refreshToken, out var record))
+            {
+                return Task.FromResult<RefreshRotationResult?>(null);
+            }
+
+            if (IsExpired(record.ExpiresAt))
+            {
+                _refreshes.Remove(refreshToken);
+                return Task.FromResult<RefreshRotationResult?>(null);
+            }
+
+            if (!string.Equals(record.ClientId, clientId, StringComparison.Ordinal))
+            {
+                return Task.FromResult<RefreshRotationResult?>(null);
+            }
+
+            if (record.IsReplayMarker)
+            {
+                if (string.IsNullOrEmpty(record.RotatedToRefreshToken)
+                    || !TouchUpstreamTokenCore(record.UpstreamJti, upstreamVaultLifetime))
+                {
+                    return Task.FromResult<RefreshRotationResult?>(null);
+                }
+
+                return Task.FromResult<RefreshRotationResult?>(
+                    new RefreshRotationResult(record.UpstreamJti, record.RotatedToRefreshToken, IsReplay: true));
+            }
+
+            if (!TouchUpstreamTokenCore(record.UpstreamJti, upstreamVaultLifetime))
+            {
+                return Task.FromResult<RefreshRotationResult?>(null);
+            }
+
+            var now = _timeProvider.GetUtcNow();
+            _refreshes[replacementRefreshToken] = new DevBrainRefreshRecord
+            {
+                RefreshToken = replacementRefreshToken,
+                ClientId = record.ClientId,
+                UpstreamJti = record.UpstreamJti,
+                CreatedAt = now,
+                ExpiresAt = now + replacementLifetime,
+                Ttl = (int)replacementLifetime.TotalSeconds,
+            };
+
+            _refreshes[refreshToken] = new DevBrainRefreshRecord
+            {
+                RefreshToken = refreshToken,
+                ClientId = record.ClientId,
+                UpstreamJti = record.UpstreamJti,
+                CreatedAt = record.CreatedAt,
+                ExpiresAt = now + replayLifetime,
+                RotatedAt = now,
+                RotatedToRefreshToken = replacementRefreshToken,
+                Ttl = (int)replayLifetime.TotalSeconds,
+            };
+
+            return Task.FromResult<RefreshRotationResult?>(
+                new RefreshRotationResult(record.UpstreamJti, replacementRefreshToken, IsReplay: false));
+        }
+    }
+
     // ---------------- Helpers ----------------
 
     private bool IsExpired(DateTimeOffset expiresAt) => expiresAt <= _timeProvider.GetUtcNow();
+
+    private bool TouchUpstreamTokenCore(string jti, TimeSpan lifetime)
+    {
+        if (!_upstreams.TryGetValue(jti, out var dto) || IsExpired(dto.ExpiresAt))
+        {
+            _upstreams.Remove(jti);
+            return false;
+        }
+
+        dto.ExpiresAt = _timeProvider.GetUtcNow() + lifetime;
+        dto.Ttl = (int)lifetime.TotalSeconds;
+        return true;
+    }
 
     // Cheap clone so the caller can't mutate the stored copy. Uses the same JSON round-trip as
     // Cosmos does on the wire — ensures test expectations match production serialization surface.

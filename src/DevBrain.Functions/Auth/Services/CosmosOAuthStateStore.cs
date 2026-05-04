@@ -10,10 +10,9 @@ namespace DevBrain.Functions.Auth.Services;
 /// Cosmos-backed <see cref="IOAuthStateStore"/>. Uses the dedicated <c>oauth_state</c> container
 /// (partition key <c>/key</c>) with native TTL enabled.
 ///
-/// Atomic operations (<see cref="RedeemAuthCodeAsync"/>, <see cref="ConsumeRefreshAsync"/>) use the
-/// read-then-ETag-conditional-delete pattern: one reader wins the delete, all concurrent readers
-/// that lose get a PreconditionFailed and return null. Same optimistic-concurrency idea as
-/// <c>CosmosDocumentStore.AppendAsync</c>.
+/// Atomic operations use ETag checks. Auth-code redemption keeps the read-then-conditional-delete
+/// pattern; refresh rotation conditionally replaces the old token with a short-lived replay marker
+/// so parallel client retries can observe the winning replacement token.
 ///
 /// Expiry is checked defensively against an injected <see cref="TimeProvider"/> on every read —
 /// Cosmos native TTL is best-effort and must not be trusted for security decisions.
@@ -195,6 +194,108 @@ public sealed class CosmosOAuthStateStore : IOAuthStateStore
         return UpsertAsync(refresh, key);
     }
 
+    public async Task<RefreshRotationResult?> RotateRefreshAsync(
+        string refreshToken,
+        string clientId,
+        string replacementRefreshToken,
+        TimeSpan replacementLifetime,
+        TimeSpan replayLifetime,
+        TimeSpan upstreamVaultLifetime)
+    {
+        var key = RefreshKey(refreshToken);
+        var partition = new PartitionKey(key);
+        var now = _timeProvider.GetUtcNow();
+
+        DevBrainRefreshRecord record;
+        string etag;
+        try
+        {
+            var response = await _container.ReadItemAsync<DevBrainRefreshRecord>(key, partition);
+            record = response.Resource;
+            etag = response.ETag;
+        }
+        catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        if (record.ExpiresAt <= now)
+        {
+            await TryDeleteAsync<DevBrainRefreshRecord>(key, partition, etag);
+            return null;
+        }
+
+        if (!string.Equals(record.ClientId, clientId, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        if (record.IsReplayMarker)
+        {
+            if (string.IsNullOrEmpty(record.RotatedToRefreshToken))
+            {
+                return null;
+            }
+
+            if (!await TouchUpstreamTokenAsync(record.UpstreamJti, upstreamVaultLifetime))
+            {
+                return null;
+            }
+
+            return new RefreshRotationResult(record.UpstreamJti, record.RotatedToRefreshToken, IsReplay: true);
+        }
+
+        if (!await TouchUpstreamTokenAsync(record.UpstreamJti, upstreamVaultLifetime))
+        {
+            return null;
+        }
+
+        var replacement = new DevBrainRefreshRecord
+        {
+            RefreshToken = replacementRefreshToken,
+            ClientId = record.ClientId,
+            UpstreamJti = record.UpstreamJti,
+            CreatedAt = now,
+            ExpiresAt = now + replacementLifetime,
+            Ttl = (int)replacementLifetime.TotalSeconds,
+        };
+        await SaveRefreshAsync(replacement);
+
+        var marker = new DevBrainRefreshRecord
+        {
+            Id = key,
+            Key = key,
+            RefreshToken = refreshToken,
+            ClientId = record.ClientId,
+            UpstreamJti = record.UpstreamJti,
+            CreatedAt = record.CreatedAt,
+            ExpiresAt = now + replayLifetime,
+            RotatedAt = now,
+            RotatedToRefreshToken = replacementRefreshToken,
+            Ttl = (int)replayLifetime.TotalSeconds,
+        };
+
+        try
+        {
+            await _container.ReplaceItemAsync(
+                marker,
+                key,
+                partition,
+                new ItemRequestOptions { IfMatchEtag = etag });
+
+            return new RefreshRotationResult(record.UpstreamJti, replacementRefreshToken, IsReplay: false);
+        }
+        catch (CosmosException ex)
+            when (ex.StatusCode == HttpStatusCode.PreconditionFailed
+               || ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            // Another request won the rotation. Re-read once and, if it left a replay marker,
+            // return that winning replacement instead of surfacing a spurious invalid_grant.
+            await DeleteAsync<DevBrainRefreshRecord>(RefreshKey(replacementRefreshToken));
+            return await ReadRefreshReplayAsync(refreshToken, clientId, upstreamVaultLifetime);
+        }
+    }
+
     public async Task<DevBrainRefreshRecord?> ConsumeRefreshAsync(string refreshToken)
     {
         var key = RefreshKey(refreshToken);
@@ -236,6 +337,89 @@ public sealed class CosmosOAuthStateStore : IOAuthStateStore
     }
 
     // ---------------- Internal helpers ----------------
+
+    private async Task<RefreshRotationResult?> ReadRefreshReplayAsync(
+        string refreshToken,
+        string clientId,
+        TimeSpan upstreamVaultLifetime)
+    {
+        var key = RefreshKey(refreshToken);
+        try
+        {
+            var response = await _container.ReadItemAsync<DevBrainRefreshRecord>(key, new PartitionKey(key));
+            var record = response.Resource;
+            if (record.ExpiresAt <= _timeProvider.GetUtcNow()
+                || !record.IsReplayMarker
+                || string.IsNullOrEmpty(record.RotatedToRefreshToken)
+                || !string.Equals(record.ClientId, clientId, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            if (!await TouchUpstreamTokenAsync(record.UpstreamJti, upstreamVaultLifetime))
+            {
+                return null;
+            }
+
+            return new RefreshRotationResult(record.UpstreamJti, record.RotatedToRefreshToken, IsReplay: true);
+        }
+        catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+    }
+
+    private async Task<bool> TouchUpstreamTokenAsync(string jti, TimeSpan lifetime)
+    {
+        var key = UpstreamKey(jti);
+        var partition = new PartitionKey(key);
+        try
+        {
+            var response = await _container.ReadItemAsync<UpstreamCosmosDto>(key, partition);
+            var dto = response.Resource;
+            var now = _timeProvider.GetUtcNow();
+            if (dto.ExpiresAt <= now)
+            {
+                await TryDeleteAsync<UpstreamCosmosDto>(key, partition, response.ETag);
+                return false;
+            }
+
+            dto.ExpiresAt = now + lifetime;
+            dto.Ttl = (int)lifetime.TotalSeconds;
+            await _container.ReplaceItemAsync(
+                dto,
+                key,
+                partition,
+                new ItemRequestOptions { IfMatchEtag = response.ETag });
+            return true;
+        }
+        catch (CosmosException ex)
+            when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+        catch (CosmosException ex)
+            when (ex.StatusCode == HttpStatusCode.PreconditionFailed)
+        {
+            // A concurrent refresh already slid the expiry. Treat that as success if the vault
+            // entry is still present and live, otherwise parallel refreshes can fail spuriously.
+            return await UpstreamTokenStillLiveAsync(jti);
+        }
+    }
+
+    private async Task<bool> UpstreamTokenStillLiveAsync(string jti)
+    {
+        var key = UpstreamKey(jti);
+        try
+        {
+            var response = await _container.ReadItemAsync<UpstreamCosmosDto>(key, new PartitionKey(key));
+            return response.Resource.ExpiresAt > _timeProvider.GetUtcNow();
+        }
+        catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+    }
 
     private async Task UpsertAsync<T>(T item, string key)
     {

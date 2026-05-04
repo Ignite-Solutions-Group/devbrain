@@ -155,6 +155,134 @@ public sealed class FakeOAuthStateStoreTests
     }
 
     [Fact]
+    public async Task RefreshToken_RotateAllowsBoundReplayAndExpiresMarker()
+    {
+        var (store, clock) = CreateStore();
+        await store.SaveUpstreamTokenAsync(new UpstreamTokenRecord
+        {
+            Jti = "jti-old",
+            Envelope = new UpstreamTokenEnvelope("at", "rt", 0),
+            ExpiresAt = Epoch.AddHours(1),
+        });
+        await store.SaveRefreshAsync(new DevBrainRefreshRecord
+        {
+            RefreshToken = "refresh-old",
+            ClientId = "abc-123",
+            UpstreamJti = "jti-old",
+            ExpiresAt = Epoch.AddDays(30),
+        });
+
+        var rotated = await store.RotateRefreshAsync(
+            "refresh-old",
+            "abc-123",
+            "refresh-new",
+            TimeSpan.FromDays(30),
+            TimeSpan.FromMinutes(5),
+            TimeSpan.FromDays(30));
+
+        Assert.NotNull(rotated);
+        Assert.False(rotated.IsReplay);
+        Assert.Equal("refresh-new", rotated.RefreshToken);
+
+        var replay = await store.RotateRefreshAsync(
+            "refresh-old",
+            "abc-123",
+            "ignored-candidate",
+            TimeSpan.FromDays(30),
+            TimeSpan.FromMinutes(5),
+            TimeSpan.FromDays(30));
+
+        Assert.NotNull(replay);
+        Assert.True(replay.IsReplay);
+        Assert.Equal("refresh-new", replay.RefreshToken);
+
+        clock.Advance(TimeSpan.FromMinutes(6));
+
+        var expiredReplay = await store.RotateRefreshAsync(
+            "refresh-old",
+            "abc-123",
+            "ignored-candidate",
+            TimeSpan.FromDays(30),
+            TimeSpan.FromMinutes(5),
+            TimeSpan.FromDays(30));
+
+        Assert.Null(expiredReplay);
+    }
+
+    [Fact]
+    public async Task RefreshToken_RotateWrongClientDoesNotConsumeToken()
+    {
+        var (store, _) = CreateStore();
+        await store.SaveUpstreamTokenAsync(new UpstreamTokenRecord
+        {
+            Jti = "jti-old",
+            Envelope = new UpstreamTokenEnvelope("at", "rt", 0),
+            ExpiresAt = Epoch.AddHours(1),
+        });
+        await store.SaveRefreshAsync(new DevBrainRefreshRecord
+        {
+            RefreshToken = "refresh-old",
+            ClientId = "abc-123",
+            UpstreamJti = "jti-old",
+            ExpiresAt = Epoch.AddDays(30),
+        });
+
+        var attacker = await store.RotateRefreshAsync(
+            "refresh-old",
+            "different-client",
+            "attacker-refresh",
+            TimeSpan.FromDays(30),
+            TimeSpan.FromMinutes(5),
+            TimeSpan.FromDays(30));
+
+        Assert.Null(attacker);
+
+        var legitimate = await store.RotateRefreshAsync(
+            "refresh-old",
+            "abc-123",
+            "refresh-new",
+            TimeSpan.FromDays(30),
+            TimeSpan.FromMinutes(5),
+            TimeSpan.FromDays(30));
+
+        Assert.NotNull(legitimate);
+        Assert.Equal("refresh-new", legitimate.RefreshToken);
+    }
+
+    [Fact]
+    public async Task RefreshToken_RotateExtendsUpstreamVaultExpiry()
+    {
+        var (store, _) = CreateStore();
+        await store.SaveUpstreamTokenAsync(new UpstreamTokenRecord
+        {
+            Jti = "jti-old",
+            Envelope = new UpstreamTokenEnvelope("at", "rt", 0),
+            ExpiresAt = Epoch.AddHours(1),
+        });
+        await store.SaveRefreshAsync(new DevBrainRefreshRecord
+        {
+            RefreshToken = "refresh-old",
+            ClientId = "abc-123",
+            UpstreamJti = "jti-old",
+            ExpiresAt = Epoch.AddDays(30),
+        });
+
+        var rotated = await store.RotateRefreshAsync(
+            "refresh-old",
+            "abc-123",
+            "refresh-new",
+            TimeSpan.FromDays(30),
+            TimeSpan.FromMinutes(5),
+            TimeSpan.FromDays(30));
+
+        Assert.NotNull(rotated);
+
+        var upstream = await store.GetUpstreamTokenAsync("jti-old");
+        Assert.NotNull(upstream);
+        Assert.Equal(Epoch.AddDays(30), upstream!.ExpiresAt);
+    }
+
+    [Fact]
     public async Task UpstreamToken_RoundTripPreservesEnvelopeAndClaims()
     {
         var (store, _) = CreateStore();

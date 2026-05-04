@@ -204,9 +204,9 @@ public sealed class TokenHandlerTests
         Assert.Equal("invalid_grant", result.ErrorCode);
     }
 
-    /// <summary>Gate #5: refresh token rotation — happy path and rotation invariant.</summary>
+    /// <summary>Gate #5: refresh token rotation with short idempotent replay.</summary>
     [Fact]
-    public async Task RefreshToken_RotatesOldAndIssuesNew()
+    public async Task RefreshToken_RotatesOldAndAllowsShortReplay()
     {
         var h = Create();
         var (code, verifier, _) = await SeedAuthCodeAsync(h);
@@ -229,11 +229,20 @@ public sealed class TokenHandlerTests
         Assert.NotEqual(firstRefresh, refreshed.Response!.RefreshToken);
         Assert.NotEmpty(refreshed.Response.AccessToken);
 
-        // Gate #5 invariant: the old refresh must now be unusable.
+        // Immediate retry/restart with the old token returns the same replacement refresh token.
         var replayed = await h.Handler.HandleAsync(new TokenRequest(
             "refresh_token", ClientId, null, null, null, firstRefresh));
-        Assert.False(replayed.IsSuccess);
-        Assert.Equal("invalid_grant", replayed.ErrorCode);
+        Assert.True(replayed.IsSuccess);
+        Assert.Equal(refreshed.Response.RefreshToken, replayed.Response!.RefreshToken);
+        Assert.NotEmpty(replayed.Response.AccessToken);
+
+        h.Clock.Advance(TimeSpan.FromMinutes(6));
+
+        // After the replay marker expires, the old refresh is rejected.
+        var lateReplay = await h.Handler.HandleAsync(new TokenRequest(
+            "refresh_token", ClientId, null, null, null, firstRefresh));
+        Assert.False(lateReplay.IsSuccess);
+        Assert.Equal("invalid_grant", lateReplay.ErrorCode);
 
         // New refresh works.
         var third = await h.Handler.HandleAsync(new TokenRequest(
@@ -255,6 +264,34 @@ public sealed class TokenHandlerTests
 
         Assert.False(attacker.IsSuccess);
         Assert.Equal("invalid_grant", attacker.ErrorCode);
+
+        // A wrong-client attempt must not burn the legitimate client's refresh token.
+        var legitimate = await h.Handler.HandleAsync(new TokenRequest(
+            "refresh_token", ClientId, null, null, null, initial.Response!.RefreshToken));
+        Assert.True(legitimate.IsSuccess);
+    }
+
+    [Fact]
+    public async Task RefreshToken_ExtendsUpstreamVaultExpiry()
+    {
+        var h = Create();
+        var (code, verifier, upstreamJti) = await SeedAuthCodeAsync(h);
+
+        var initial = await h.Handler.HandleAsync(new TokenRequest(
+            "authorization_code", ClientId, code, verifier, ClientRedirect, null));
+
+        var before = await h.Store.GetUpstreamTokenAsync(upstreamJti);
+        Assert.NotNull(before);
+        Assert.Equal(Epoch.AddHours(1), before!.ExpiresAt);
+
+        var refreshed = await h.Handler.HandleAsync(new TokenRequest(
+            "refresh_token", ClientId, null, null, null, initial.Response!.RefreshToken));
+
+        Assert.True(refreshed.IsSuccess);
+
+        var after = await h.Store.GetUpstreamTokenAsync(upstreamJti);
+        Assert.NotNull(after);
+        Assert.Equal(Epoch.AddDays(30), after!.ExpiresAt);
     }
 
     [Fact]

@@ -43,3 +43,6 @@ Thumbs.db
 
 #Claude folder
 .claude/
+
+# Serena local workspace metadata
+.serena/

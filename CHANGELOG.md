@@ -2,6 +2,23 @@
 
 All notable changes to DevBrain are tracked in this file. Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Hardened the OAuth `refresh_token` grant for MCP clients that retry or restart while their local credential cache is catching up to token rotation. A successful refresh now leaves a five-minute replay marker for the old refresh token, so an immediate retry returns the same replacement refresh token instead of forcing a reconnect. Wrong-client refresh attempts are rejected without consuming the legitimate client's token, and successful refresh/replay calls slide the upstream token vault TTL forward with the local refresh window.
+
+### Changed
+- Synced the release notes with merged Dependabot PR #19, which already moved `Microsoft.AspNetCore.DataProtection` and `System.Security.Cryptography.Xml` to 10.0.7.
+- Patched the remaining Azure Data Protection helper packages to `Azure.Extensions.AspNetCore.DataProtection.Blobs` 1.5.2 and `Azure.Extensions.AspNetCore.DataProtection.Keys` 1.6.2, then replaced the stale 10.0.6 workaround comment in the project file.
+- Added `.serena/` to `.gitignore` so local Serena workspace metadata stays out of the public repository.
+
+### Validation
+- `dotnet list devbrain.slnx package --vulnerable --include-transitive` reports no vulnerable packages.
+- `dotnet list devbrain.slnx package --outdated --highest-patch` reports no patch-level updates for direct package references.
+- `dotnet list devbrain.slnx package --outdated --include-transitive` was checked; it still reports broader direct/transitive updates in Azure Functions, Application Insights, IdentityModel, Cosmos, and test tooling that are left for a separate dependency refresh.
+- `dotnet list devbrain.slnx package --deprecated` still reports two known migration items left outside this auth fix: `Microsoft.ApplicationInsights.WorkerService` 2.22.0 and `xunit` 2.9.3.
+- `dotnet test devbrain.slnx` passes with 141 tests.
+
 ## [1.9.0] — 2026-04-15
 
 A new `EditTags` tool lets callers adjust tag metadata on an existing document without re-emitting its content. Previously the only way to add or drop a tag was a full `UpsertDocument` round-trip that re-sent the entire body — wasteful for large documents whose content isn't changing.
