@@ -65,7 +65,7 @@ public interface IOAuthStateStore
     /// replacement token. The referenced upstream vault record is defensively extended as part of
     /// the rotation/replay path.
     /// </summary>
-    Task<RefreshRotationResult?> RotateRefreshAsync(
+    Task<RefreshRotationResult> RotateRefreshAsync(
         string refreshToken,
         string clientId,
         string replacementRefreshToken,

@@ -194,7 +194,7 @@ public sealed class CosmosOAuthStateStore : IOAuthStateStore
         return UpsertAsync(refresh, key);
     }
 
-    public async Task<RefreshRotationResult?> RotateRefreshAsync(
+    public async Task<RefreshRotationResult> RotateRefreshAsync(
         string refreshToken,
         string clientId,
         string replacementRefreshToken,
@@ -216,38 +216,41 @@ public sealed class CosmosOAuthStateStore : IOAuthStateStore
         }
         catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
         {
-            return null;
+            return RefreshRotationResult.Rejected(RefreshRotationOutcome.Missing);
         }
 
         if (record.ExpiresAt <= now)
         {
             await TryDeleteAsync<DevBrainRefreshRecord>(key, partition, etag);
-            return null;
+            return RefreshRotationResult.Rejected(
+                record.IsReplayMarker
+                    ? RefreshRotationOutcome.ReplayWindowExpired
+                    : RefreshRotationOutcome.Expired);
         }
 
         if (!string.Equals(record.ClientId, clientId, StringComparison.Ordinal))
         {
-            return null;
+            return RefreshRotationResult.Rejected(RefreshRotationOutcome.WrongClient);
         }
 
         if (record.IsReplayMarker)
         {
             if (string.IsNullOrEmpty(record.RotatedToRefreshToken))
             {
-                return null;
+                return RefreshRotationResult.Rejected(RefreshRotationOutcome.ReplayMarkerMissingReplacement);
             }
 
             if (!await TouchUpstreamTokenAsync(record.UpstreamJti, upstreamVaultLifetime))
             {
-                return null;
+                return RefreshRotationResult.Rejected(RefreshRotationOutcome.UpstreamMissingOrExpired);
             }
 
-            return new RefreshRotationResult(record.UpstreamJti, record.RotatedToRefreshToken, IsReplay: true);
+            return RefreshRotationResult.Replayed(record.UpstreamJti, record.RotatedToRefreshToken);
         }
 
         if (!await TouchUpstreamTokenAsync(record.UpstreamJti, upstreamVaultLifetime))
         {
-            return null;
+            return RefreshRotationResult.Rejected(RefreshRotationOutcome.UpstreamMissingOrExpired);
         }
 
         var replacement = new DevBrainRefreshRecord
@@ -283,7 +286,7 @@ public sealed class CosmosOAuthStateStore : IOAuthStateStore
                 partition,
                 new ItemRequestOptions { IfMatchEtag = etag });
 
-            return new RefreshRotationResult(record.UpstreamJti, replacementRefreshToken, IsReplay: false);
+            return RefreshRotationResult.Rotated(record.UpstreamJti, replacementRefreshToken);
         }
         catch (CosmosException ex)
             when (ex.StatusCode == HttpStatusCode.PreconditionFailed
@@ -292,7 +295,10 @@ public sealed class CosmosOAuthStateStore : IOAuthStateStore
             // Another request won the rotation. Re-read once and, if it left a replay marker,
             // return that winning replacement instead of surfacing a spurious invalid_grant.
             await DeleteAsync<DevBrainRefreshRecord>(RefreshKey(replacementRefreshToken));
-            return await ReadRefreshReplayAsync(refreshToken, clientId, upstreamVaultLifetime);
+            var replay = await ReadRefreshReplayAsync(refreshToken, clientId, upstreamVaultLifetime);
+            return replay.Succeeded
+                ? replay
+                : RefreshRotationResult.Rejected(RefreshRotationOutcome.ConcurrentReplayUnavailable);
         }
     }
 
@@ -338,7 +344,7 @@ public sealed class CosmosOAuthStateStore : IOAuthStateStore
 
     // ---------------- Internal helpers ----------------
 
-    private async Task<RefreshRotationResult?> ReadRefreshReplayAsync(
+    private async Task<RefreshRotationResult> ReadRefreshReplayAsync(
         string refreshToken,
         string clientId,
         TimeSpan upstreamVaultLifetime)
@@ -348,24 +354,39 @@ public sealed class CosmosOAuthStateStore : IOAuthStateStore
         {
             var response = await _container.ReadItemAsync<DevBrainRefreshRecord>(key, new PartitionKey(key));
             var record = response.Resource;
-            if (record.ExpiresAt <= _timeProvider.GetUtcNow()
-                || !record.IsReplayMarker
-                || string.IsNullOrEmpty(record.RotatedToRefreshToken)
-                || !string.Equals(record.ClientId, clientId, StringComparison.Ordinal))
+            if (record.ExpiresAt <= _timeProvider.GetUtcNow())
             {
-                return null;
+                return RefreshRotationResult.Rejected(
+                    record.IsReplayMarker
+                        ? RefreshRotationOutcome.ReplayWindowExpired
+                        : RefreshRotationOutcome.Expired);
+            }
+
+            if (!string.Equals(record.ClientId, clientId, StringComparison.Ordinal))
+            {
+                return RefreshRotationResult.Rejected(RefreshRotationOutcome.WrongClient);
+            }
+
+            if (!record.IsReplayMarker)
+            {
+                return RefreshRotationResult.Rejected(RefreshRotationOutcome.ConcurrentReplayUnavailable);
+            }
+
+            if (string.IsNullOrEmpty(record.RotatedToRefreshToken))
+            {
+                return RefreshRotationResult.Rejected(RefreshRotationOutcome.ReplayMarkerMissingReplacement);
             }
 
             if (!await TouchUpstreamTokenAsync(record.UpstreamJti, upstreamVaultLifetime))
             {
-                return null;
+                return RefreshRotationResult.Rejected(RefreshRotationOutcome.UpstreamMissingOrExpired);
             }
 
-            return new RefreshRotationResult(record.UpstreamJti, record.RotatedToRefreshToken, IsReplay: true);
+            return RefreshRotationResult.Replayed(record.UpstreamJti, record.RotatedToRefreshToken);
         }
         catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
         {
-            return null;
+            return RefreshRotationResult.Rejected(RefreshRotationOutcome.Missing);
         }
     }
 
