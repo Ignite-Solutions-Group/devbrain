@@ -180,7 +180,8 @@ public sealed class FakeOAuthStateStoreTests
             TimeSpan.FromMinutes(5),
             TimeSpan.FromDays(30));
 
-        Assert.NotNull(rotated);
+        Assert.True(rotated.Succeeded);
+        Assert.Equal(RefreshRotationOutcome.Rotated, rotated.Outcome);
         Assert.False(rotated.IsReplay);
         Assert.Equal("refresh-new", rotated.RefreshToken);
 
@@ -192,7 +193,8 @@ public sealed class FakeOAuthStateStoreTests
             TimeSpan.FromMinutes(5),
             TimeSpan.FromDays(30));
 
-        Assert.NotNull(replay);
+        Assert.True(replay.Succeeded);
+        Assert.Equal(RefreshRotationOutcome.Replayed, replay.Outcome);
         Assert.True(replay.IsReplay);
         Assert.Equal("refresh-new", replay.RefreshToken);
 
@@ -206,7 +208,8 @@ public sealed class FakeOAuthStateStoreTests
             TimeSpan.FromMinutes(5),
             TimeSpan.FromDays(30));
 
-        Assert.Null(expiredReplay);
+        Assert.False(expiredReplay.Succeeded);
+        Assert.Equal(RefreshRotationOutcome.ReplayWindowExpired, expiredReplay.Outcome);
     }
 
     [Fact]
@@ -235,7 +238,8 @@ public sealed class FakeOAuthStateStoreTests
             TimeSpan.FromMinutes(5),
             TimeSpan.FromDays(30));
 
-        Assert.Null(attacker);
+        Assert.False(attacker.Succeeded);
+        Assert.Equal(RefreshRotationOutcome.WrongClient, attacker.Outcome);
 
         var legitimate = await store.RotateRefreshAsync(
             "refresh-old",
@@ -245,7 +249,7 @@ public sealed class FakeOAuthStateStoreTests
             TimeSpan.FromMinutes(5),
             TimeSpan.FromDays(30));
 
-        Assert.NotNull(legitimate);
+        Assert.True(legitimate.Succeeded);
         Assert.Equal("refresh-new", legitimate.RefreshToken);
     }
 
@@ -275,11 +279,69 @@ public sealed class FakeOAuthStateStoreTests
             TimeSpan.FromMinutes(5),
             TimeSpan.FromDays(30));
 
-        Assert.NotNull(rotated);
+        Assert.True(rotated.Succeeded);
 
         var upstream = await store.GetUpstreamTokenAsync("jti-old");
         Assert.NotNull(upstream);
         Assert.Equal(Epoch.AddDays(30), upstream!.ExpiresAt);
+    }
+
+    [Fact]
+    public async Task RefreshToken_RotateReportsFailureReasons()
+    {
+        var (store, clock) = CreateStore();
+
+        var missing = await store.RotateRefreshAsync(
+            "missing-refresh",
+            "abc-123",
+            "replacement",
+            TimeSpan.FromDays(30),
+            TimeSpan.FromMinutes(5),
+            TimeSpan.FromDays(30));
+
+        Assert.False(missing.Succeeded);
+        Assert.Equal(RefreshRotationOutcome.Missing, missing.Outcome);
+        Assert.Equal("missing", missing.LogCode);
+
+        await store.SaveRefreshAsync(new DevBrainRefreshRecord
+        {
+            RefreshToken = "expired-refresh",
+            ClientId = "abc-123",
+            UpstreamJti = "jti-expired",
+            ExpiresAt = Epoch.AddMinutes(1),
+        });
+
+        clock.Advance(TimeSpan.FromMinutes(2));
+
+        var expired = await store.RotateRefreshAsync(
+            "expired-refresh",
+            "abc-123",
+            "replacement",
+            TimeSpan.FromDays(30),
+            TimeSpan.FromMinutes(5),
+            TimeSpan.FromDays(30));
+
+        Assert.False(expired.Succeeded);
+        Assert.Equal(RefreshRotationOutcome.Expired, expired.Outcome);
+
+        await store.SaveRefreshAsync(new DevBrainRefreshRecord
+        {
+            RefreshToken = "orphan-refresh",
+            ClientId = "abc-123",
+            UpstreamJti = "missing-upstream",
+            ExpiresAt = Epoch.AddDays(1),
+        });
+
+        var orphan = await store.RotateRefreshAsync(
+            "orphan-refresh",
+            "abc-123",
+            "replacement",
+            TimeSpan.FromDays(30),
+            TimeSpan.FromMinutes(5),
+            TimeSpan.FromDays(30));
+
+        Assert.False(orphan.Succeeded);
+        Assert.Equal(RefreshRotationOutcome.UpstreamMissingOrExpired, orphan.Outcome);
     }
 
     [Fact]
