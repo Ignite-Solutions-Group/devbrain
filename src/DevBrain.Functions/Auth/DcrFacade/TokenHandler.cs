@@ -164,24 +164,30 @@ public sealed class TokenHandler
             RefreshReplayLifetime,
             UpstreamVaultTtl);
 
-        if (rotation is null)
+        if (!rotation.Succeeded)
         {
-            _logger?.LogWarning("TokenHandler/refresh: rejected — refresh_token invalid, expired, wrong client, or upstream session expired");
+            _logger?.LogWarning(
+                "TokenHandler/refresh: rejected reason={Reason} clientId={ClientId} refreshTokenFingerprint={RefreshTokenFingerprint}",
+                rotation.LogCode, request.ClientId, FingerprintToken(request.RefreshToken));
             return TokenResult.Error("invalid_grant", "refresh_token is invalid, expired, already rotated outside the replay window, or bound to a different client.");
         }
 
-        var upstreamJti = rotation.UpstreamJti;
+        var upstreamJti = rotation.UpstreamJti!;
         var (jwt, _) = IssueJwtForUpstream(upstreamJti);
 
         _logger?.LogInformation(
-            "TokenHandler/refresh: {RotationKind} refresh clientId={ClientId} upstreamJti={Jti}",
-            rotation.IsReplay ? "replayed" : "rotated", request.ClientId, upstreamJti);
+            "TokenHandler/refresh: {RotationKind} refresh clientId={ClientId} upstreamJti={Jti} refreshTokenFingerprint={RefreshTokenFingerprint} returnedRefreshTokenFingerprint={ReturnedRefreshTokenFingerprint}",
+            rotation.IsReplay ? "replayed" : "rotated",
+            request.ClientId,
+            upstreamJti,
+            FingerprintToken(request.RefreshToken),
+            FingerprintToken(rotation.RefreshToken!));
 
         return TokenResult.Success(new TokenResponse(
             AccessToken: jwt,
             TokenType: "Bearer",
             ExpiresIn: (int)AccessTokenLifetime.TotalSeconds,
-            RefreshToken: rotation.RefreshToken,
+            RefreshToken: rotation.RefreshToken!,
             Scope: "documents.readwrite"));
     }
 
@@ -224,6 +230,13 @@ public sealed class TokenHandler
         var bytes = new byte[32];
         RandomNumberGenerator.Fill(bytes);
         return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    }
+
+    private static string FingerprintToken(string token)
+    {
+        Span<byte> hash = stackalloc byte[32];
+        SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(token), hash);
+        return Convert.ToHexString(hash[..6]).ToLowerInvariant();
     }
 }
 

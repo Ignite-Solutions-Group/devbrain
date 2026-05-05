@@ -242,7 +242,7 @@ public sealed class FakeOAuthStateStore : IOAuthStateStore
         }
     }
 
-    public Task<RefreshRotationResult?> RotateRefreshAsync(
+    public Task<RefreshRotationResult> RotateRefreshAsync(
         string refreshToken,
         string clientId,
         string replacementRefreshToken,
@@ -255,35 +255,41 @@ public sealed class FakeOAuthStateStore : IOAuthStateStore
             ReadCallCount++;
             if (!_refreshes.TryGetValue(refreshToken, out var record))
             {
-                return Task.FromResult<RefreshRotationResult?>(null);
+                return Task.FromResult(RefreshRotationResult.Rejected(RefreshRotationOutcome.Missing));
             }
 
             if (IsExpired(record.ExpiresAt))
             {
                 _refreshes.Remove(refreshToken);
-                return Task.FromResult<RefreshRotationResult?>(null);
+                return Task.FromResult(RefreshRotationResult.Rejected(
+                    record.IsReplayMarker
+                        ? RefreshRotationOutcome.ReplayWindowExpired
+                        : RefreshRotationOutcome.Expired));
             }
 
             if (!string.Equals(record.ClientId, clientId, StringComparison.Ordinal))
             {
-                return Task.FromResult<RefreshRotationResult?>(null);
+                return Task.FromResult(RefreshRotationResult.Rejected(RefreshRotationOutcome.WrongClient));
             }
 
             if (record.IsReplayMarker)
             {
-                if (string.IsNullOrEmpty(record.RotatedToRefreshToken)
-                    || !TouchUpstreamTokenCore(record.UpstreamJti, upstreamVaultLifetime))
+                if (string.IsNullOrEmpty(record.RotatedToRefreshToken))
                 {
-                    return Task.FromResult<RefreshRotationResult?>(null);
+                    return Task.FromResult(RefreshRotationResult.Rejected(RefreshRotationOutcome.ReplayMarkerMissingReplacement));
                 }
 
-                return Task.FromResult<RefreshRotationResult?>(
-                    new RefreshRotationResult(record.UpstreamJti, record.RotatedToRefreshToken, IsReplay: true));
+                if (!TouchUpstreamTokenCore(record.UpstreamJti, upstreamVaultLifetime))
+                {
+                    return Task.FromResult(RefreshRotationResult.Rejected(RefreshRotationOutcome.UpstreamMissingOrExpired));
+                }
+
+                return Task.FromResult(RefreshRotationResult.Replayed(record.UpstreamJti, record.RotatedToRefreshToken));
             }
 
             if (!TouchUpstreamTokenCore(record.UpstreamJti, upstreamVaultLifetime))
             {
-                return Task.FromResult<RefreshRotationResult?>(null);
+                return Task.FromResult(RefreshRotationResult.Rejected(RefreshRotationOutcome.UpstreamMissingOrExpired));
             }
 
             var now = _timeProvider.GetUtcNow();
@@ -309,8 +315,7 @@ public sealed class FakeOAuthStateStore : IOAuthStateStore
                 Ttl = (int)replayLifetime.TotalSeconds,
             };
 
-            return Task.FromResult<RefreshRotationResult?>(
-                new RefreshRotationResult(record.UpstreamJti, replacementRefreshToken, IsReplay: false));
+            return Task.FromResult(RefreshRotationResult.Rotated(record.UpstreamJti, replacementRefreshToken));
         }
     }
 
