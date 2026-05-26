@@ -9,6 +9,9 @@ All notable changes to DevBrain are tracked in this file. Versions follow [Seman
 
 ### Changed
 - Added reason-specific server-side diagnostics for OAuth refresh failures. `TokenHandler/refresh` now logs a stable rejection reason (`missing`, `expired`, `replay_window_expired`, `wrong_client`, `upstream_missing_or_expired`, etc.) plus short SHA-256 refresh-token fingerprints so stale per-session Codex credential generations can be correlated without logging token material.
+- Refreshed the deployed runtime dependency stack to current compatible NuGet releases, including `Microsoft.Azure.Functions.Worker` 2.52.0, `Microsoft.Azure.Functions.Worker.Extensions.Mcp` 1.5.0, `ModelContextProtocol` 1.3.0, `Microsoft.ApplicationInsights.WorkerService` 2.23.0, `Microsoft.Azure.Cosmos` 3.60.0, `Microsoft.Extensions.Azure` 1.14.0, IdentityModel 8.18.0, and the Data Protection/XML crypto 10.0.8 servicing line.
+- Kept Application Insights on the direct Azure Functions isolated worker integration path (`AddApplicationInsightsTelemetryWorkerService` + `ConfigureFunctionsApplicationInsights`) instead of moving to the newer OpenTelemetry telemetry wiring.
+- Refreshed test tooling to `Microsoft.NET.Test.Sdk` 18.6.0, `xunit.runner.visualstudio` 3.1.5, and `Microsoft.Extensions.TimeProvider.Testing` 10.6.0.
 - Synced the release notes with merged Dependabot PR #19, which already moved `Microsoft.AspNetCore.DataProtection` and `System.Security.Cryptography.Xml` to 10.0.7.
 - Patched the remaining Azure Data Protection helper packages to `Azure.Extensions.AspNetCore.DataProtection.Blobs` 1.5.2 and `Azure.Extensions.AspNetCore.DataProtection.Keys` 1.6.2, then replaced the stale 10.0.6 workaround comment in the project file.
 - Added `.serena/` to `.gitignore` so local Serena workspace metadata stays out of the public repository.
@@ -16,8 +19,8 @@ All notable changes to DevBrain are tracked in this file. Versions follow [Seman
 ### Validation
 - `dotnet list devbrain.slnx package --vulnerable --include-transitive` reports no vulnerable packages.
 - `dotnet list devbrain.slnx package --outdated --highest-patch` reports no patch-level updates for direct package references.
-- `dotnet list devbrain.slnx package --outdated --include-transitive` was checked; it still reports broader direct/transitive updates in Azure Functions, Application Insights, IdentityModel, Cosmos, and test tooling that are left for a separate dependency refresh.
-- `dotnet list devbrain.slnx package --deprecated` still reports two known migration items left outside this auth fix: `Microsoft.ApplicationInsights.WorkerService` 2.22.0 and `xunit` 2.9.3.
+- `dotnet list devbrain.slnx package --outdated --include-transitive` was checked; direct package references are current except the intentional `Microsoft.ApplicationInsights.WorkerService` 2.x hold for the existing Functions Application Insights integration path, with upstream-owned transitive package updates still reported.
+- `dotnet list devbrain.slnx package --deprecated` reports no deprecated packages in `DevBrain.Functions`; the remaining deprecation is the test-only `xunit` 2.9.3 package, which requires a separate xUnit v3 migration.
 - `dotnet test devbrain.slnx` passes with 142 tests.
 
 ## [1.9.0] — 2026-04-15
