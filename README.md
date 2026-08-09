@@ -66,6 +66,8 @@ azd up
 
 **Before `azd up`**, create a single Entra app registration in your tenant (see CHANGELOG v1.6.0 for the full prerequisite checklist). After deployment, populate the two Key Vault secrets:
 
+`ENTRA_TENANT_ID` and `ENTRA_CLIENT_ID` are Bicep-owned Function App settings. Keep them in the azd environment before running `azd provision` or `azd up`; `azd deploy` alone does not modify them.
+
 ```powershell
 az keyvault secret set --vault-name <kv-name> --name jwt-signing-secret --value $(openssl rand -base64 32)
 az keyvault secret set --vault-name <kv-name> --name entra-client-secret --value <secret-from-entra-app>
@@ -111,13 +113,39 @@ https://<FUNCTION_URL>/runtime/webhooks/mcp
 
 OAuth completes automatically — no proxy, no function key, no manual headers.
 
-### Codex (Windows App / CLI)
+### ChatGPT / Codex (Windows App and CLI)
+
+The modern unified ChatGPT/Codex app for Windows is currently working well with DevBrain OAuth. This is treated as operationally healthy but still under monitoring, rather than a permanent compatibility guarantee.
 
 ```bash
 codex mcp add devbrain --transport http https://<FUNCTION_URL>/runtime/webhooks/mcp
 ```
 
-DevBrain rotates OAuth refresh tokens on every refresh. To tolerate Codex Windows App/CLI retry or restart races while the local credential cache catches up, DevBrain keeps a short replay window for the just-rotated token and returns the same replacement refresh token during that window.
+### OAuth token windows
+
+DevBrain rotates OAuth refresh tokens on every refresh. To tolerate brief client retry or restart races while a credential cache catches up, the just-rotated token remains a replay marker for a short period and returns the same replacement refresh token during that window.
+
+Deployments can tune the access-token lifetime and refresh replay window when their client mix or operating environment needs a different refresh cadence. For example:
+
+```powershell
+azd env set OAUTH_ACCESS_TOKEN_LIFETIME_MINUTES 45
+azd env set OAUTH_REFRESH_REPLAY_LIFETIME_MINUTES 5
+azd provision
+azd deploy
+```
+
+`azd provision` applies the Bicep app settings. `azd deploy` only deploys application code, so existing Function App settings persist across code-only updates. If the `OAUTH_*` values are not set in the azd environment, Bicep creates blank settings and DevBrain uses its built-in defaults.
+
+These `azd` values provision the Function App settings:
+
+```text
+OAuth__AccessTokenLifetimeMinutes=45
+OAuth__RefreshReplayLifetimeMinutes=5
+```
+
+For a one-off test on an already-provisioned Function App, set the same `OAuth__*` app settings directly with Azure CLI or the portal, then restart the app. Both values must be whole minutes from 1 through 1,440. Defaults are 10 minutes for access tokens and 5 minutes for refresh replay markers.
+
+Keep both windows as short as the client population allows. A longer access-token lifetime reduces refresh frequency but extends the useful lifetime of a stolen bearer token. A longer replay window makes an old refresh token reusable for longer and should only be used to accommodate a measured client retry interval.
 
 ### VS Code / GitHub Copilot
 
@@ -293,7 +321,7 @@ Every write operation records the authenticated user's Entra UPN in the `updated
 
 ### Refresh Token Rotation
 
-Access tokens are short-lived and DevBrain refresh tokens rotate on every refresh. The old refresh token becomes a five-minute replay marker that points at the replacement token, which makes immediate MCP client retries idempotent without reopening the OAuth flow. Replays outside that window still fail with `invalid_grant`, and every successful refresh or replay extends the upstream token vault record for the same local refresh window.
+Access tokens are short-lived and DevBrain refresh tokens rotate on every refresh. By default, the old refresh token becomes a five-minute replay marker that points at the replacement token, which makes immediate MCP client retries idempotent without reopening the OAuth flow. Replays outside the configured window still fail with `invalid_grant`, and every successful refresh or replay extends the upstream token vault record for the same local refresh window. See [OAuth token windows](#oauth-token-windows) for configuration and security tradeoffs.
 
 ## Known Limitations
 
@@ -321,11 +349,10 @@ Other clients work because they probe PRM proactively rather than waiting to be 
 | Claude Code | claude.ai web | OAuth (DCR) | ✅ Working |
 | Claude Desktop | Windows | OAuth (DCR) | ✅ Working |
 | Claude Mobile | Android | OAuth (DCR) | ✅ Working |
-| Codex App | Windows | OAuth (DCR) | ✅ Working |
+| ChatGPT / Codex unified app | Windows | OAuth (DCR) | ✅ Working; monitoring |
 | Codex CLI | Windows Terminal | OAuth (DCR) | ✅ Working |
 | Codex CLI | WSL | OAuth (DCR) | ✅ Working |
 | VS Code / GitHub Copilot | Windows | OAuth (DCR) | ⚠️ [See above](#vs-code--github-copilot-mcp-extension--oauth-not-triggered) |
-| ChatGPT | — | — | ❌ MCP not supported |
 | Cursor | — | OAuth (DCR) | Not tested |
 
 ## Contributing

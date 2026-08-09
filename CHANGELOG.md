@@ -5,11 +5,14 @@ All notable changes to DevBrain are tracked in this file. Versions follow [Seman
 ## [Unreleased]
 
 ### Fixed
-- Hardened the OAuth `refresh_token` grant for MCP clients that retry or restart while their local credential cache is catching up to token rotation. A successful refresh now leaves a five-minute replay marker for the old refresh token, so an immediate retry returns the same replacement refresh token instead of forcing a reconnect. Wrong-client refresh attempts are rejected without consuming the legitimate client's token, and successful refresh/replay calls slide the upstream token vault TTL forward with the local refresh window.
+- Hardened the OAuth `refresh_token` grant for MCP clients that retry or restart while their local credential cache is catching up to token rotation. A successful refresh now leaves a short replay marker for the old refresh token, so an immediate retry returns the same replacement refresh token instead of forcing a reconnect. Wrong-client refresh attempts are rejected without consuming the legitimate client's token, and successful refresh/replay calls slide the upstream token vault TTL forward with the local refresh window.
+- Added Bicep validation for the required Entra tenant/client parameters so `azd provision` fails fast instead of blanking `OAuth__EntraTenantId` or `OAuth__EntraClientId`.
 
 ### Changed
-- Added reason-specific server-side diagnostics for OAuth refresh failures. `TokenHandler/refresh` now logs a stable rejection reason (`missing`, `expired`, `replay_window_expired`, `wrong_client`, `upstream_missing_or_expired`, etc.) plus short SHA-256 refresh-token fingerprints so stale per-session Codex credential generations can be correlated without logging token material.
-- Refreshed the deployed runtime dependency stack to current compatible NuGet releases, including `Microsoft.Azure.Functions.Worker` 2.52.0, `Microsoft.Azure.Functions.Worker.Extensions.Mcp` 1.5.0, `ModelContextProtocol` 1.3.0, `Microsoft.ApplicationInsights.WorkerService` 2.23.0, `Microsoft.Azure.Cosmos` 3.60.0, `Microsoft.Extensions.Azure` 1.14.0, IdentityModel 8.18.0, and the Data Protection/XML crypto 10.0.8 servicing line.
+- Added reason-specific server-side diagnostics for OAuth refresh failures. `TokenHandler/refresh` now logs a stable rejection reason (`missing`, `expired`, `replay_window_expired`, `wrong_client`, `upstream_missing_or_expired`, etc.) plus short SHA-256 refresh-token fingerprints so stale per-session client credential generations can be correlated without logging token material.
+- Updated the compatibility notes for the modern unified ChatGPT/Codex Windows app, which is currently working well with DevBrain OAuth but remains under monitoring rather than being marked fully resolved.
+- Added optional OAuth token-window settings for deployments that need a different refresh cadence or replay tolerance: `OAUTH_ACCESS_TOKEN_LIFETIME_MINUTES` and `OAUTH_REFRESH_REPLAY_LIFETIME_MINUTES` flow through Bicep to `OAuth__AccessTokenLifetimeMinutes` and `OAuth__RefreshReplayLifetimeMinutes`. Values must be whole minutes from 1 through 1,440. If left unset, DevBrain uses its built-in defaults: 10 minutes for access tokens and 5 minutes for refresh replay markers.
+- Refreshed the deployed runtime dependency stack to current compatible NuGet releases, including `Microsoft.Azure.Functions.Worker` 2.52.0, `Microsoft.Azure.Functions.Worker.Extensions.Mcp` 1.5.0, `ModelContextProtocol` 1.3.0, `Microsoft.ApplicationInsights.WorkerService` 2.23.0, `Microsoft.Azure.Cosmos` 3.60.0, `Microsoft.Extensions.Azure` 1.14.0, IdentityModel 8.18.0, `Microsoft.AspNetCore.DataProtection` 10.0.8, and `System.Security.Cryptography.Xml` 10.0.10.
 - Kept Application Insights on the direct Azure Functions isolated worker integration path (`AddApplicationInsightsTelemetryWorkerService` + `ConfigureFunctionsApplicationInsights`) instead of moving to the newer OpenTelemetry telemetry wiring.
 - Refreshed test tooling to `Microsoft.NET.Test.Sdk` 18.6.0, `xunit.runner.visualstudio` 3.1.5, and `Microsoft.Extensions.TimeProvider.Testing` 10.6.0.
 - Synced the release notes with merged Dependabot PR #19, which already moved `Microsoft.AspNetCore.DataProtection` and `System.Security.Cryptography.Xml` to 10.0.7.
@@ -21,7 +24,7 @@ All notable changes to DevBrain are tracked in this file. Versions follow [Seman
 - `dotnet list devbrain.slnx package --outdated --highest-patch` reports no patch-level updates for direct package references.
 - `dotnet list devbrain.slnx package --outdated --include-transitive` was checked; direct package references are current except the intentional `Microsoft.ApplicationInsights.WorkerService` 2.x hold for the existing Functions Application Insights integration path, with upstream-owned transitive package updates still reported.
 - `dotnet list devbrain.slnx package --deprecated` reports no deprecated packages in `DevBrain.Functions`; the remaining deprecation is the test-only `xunit` 2.9.3 package, which requires a separate xUnit v3 migration.
-- `dotnet test devbrain.slnx` passes with 142 tests.
+- `dotnet test devbrain.slnx` passes with 148 tests.
 
 ## [1.9.0] — 2026-04-15
 
