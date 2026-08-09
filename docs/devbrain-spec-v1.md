@@ -89,7 +89,7 @@ Partition key path: `/key`. The `id` and `key` fields are always identical — t
 
 ## MCP Tools
 
-All four tools are implemented in `DocumentTools.cs` using `[McpServerTool]` attributes from the `ModelContextProtocol` C# SDK. The Azure Functions MCP extension (`Microsoft.Azure.Functions.Worker.Extensions.Mcp`) wires them into the Functions runtime via `[McpToolTrigger]`.
+All four tools are implemented in `DocumentTools.cs` using `[McpToolTrigger]` attributes from `Microsoft.Azure.Functions.Worker.Extensions.Mcp`.
 
 ### `UpsertDocument`
 
@@ -148,7 +148,6 @@ Authentication is handled by Azure Functions' built-in Easy Auth (App Service Au
 <PackageReference Include="Microsoft.Azure.Functions.Worker" />
 <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Mcp" />
 <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Http" />
-<PackageReference Include="ModelContextProtocol" />
 <PackageReference Include="Microsoft.Azure.Cosmos" />
 <PackageReference Include="Azure.Identity" />
 <PackageReference Include="Microsoft.Extensions.Azure" />
