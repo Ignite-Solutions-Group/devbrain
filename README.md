@@ -325,6 +325,10 @@ Access tokens are short-lived and DevBrain refresh tokens rotate on every refres
 
 ## Known Limitations
 
+### MCP protocol revision
+
+DevBrain uses `Microsoft.Azure.Functions.Worker.Extensions.Mcp` 1.6.0 for its hosted MCP endpoint. That extension currently embeds the older official C# SDK line and negotiates MCP through protocol revision `2025-06-18`; updating an application-level `ModelContextProtocol` package cannot change the host's wire behavior. Supporting MCP `2026-07-28` will require either a future Azure Functions MCP host update or a deliberate migration to an application-owned MCP HTTP host. Existing clients that negotiate a supported revision continue to work normally.
+
 ### VS Code / GitHub Copilot MCP extension — OAuth not triggered
 
 VS Code connects to the MCP endpoint, gets a 200 OK on `tools/list`, discovers all 7 tools, and proceeds as if no auth is required. Tool calls then fail with a missing Bearer token. **VS Code's behavior is correct per the MCP authorization spec** — the spec requires the server to challenge unauthenticated requests with `401 + WWW-Authenticate: Bearer resource_metadata="..."`, at which point the client reads PRM and starts OAuth.
