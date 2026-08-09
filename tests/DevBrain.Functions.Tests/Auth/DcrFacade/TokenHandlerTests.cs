@@ -26,7 +26,7 @@ public sealed class TokenHandlerTests
         DevBrainJwtIssuer JwtIssuer,
         FakeTimeProvider Clock);
 
-    private static Harness Create()
+    private static Harness Create(TokenHandlerOptions? options = null)
     {
         var clock = new FakeTimeProvider(Epoch);
         var store = new FakeOAuthStateStore(clock);
@@ -39,7 +39,9 @@ public sealed class TokenHandlerTests
                 TenantId = TestTenantId,
             },
             clock);
-        var handler = new TokenHandler(store, jwtIssuer, clock);
+        var handler = options is null
+            ? new TokenHandler(store, jwtIssuer, clock)
+            : new TokenHandler(store, jwtIssuer, clock, options, logger: null);
         return new Harness(handler, store, jwtIssuer, clock);
     }
 
@@ -97,6 +99,29 @@ public sealed class TokenHandlerTests
         Assert.Equal(600, result.Response.ExpiresIn);
 
         // The issued JWT must validate against the same issuer (round-trip via signing material).
+        var validation = await h.JwtIssuer.ValidateAsync(result.Response.AccessToken);
+        Assert.True(validation.IsValid);
+    }
+
+    [Fact]
+    public async Task AuthorizationCode_ConfiguredAccessTokenLifetime_ControlsExpiresIn()
+    {
+        var h = Create(new TokenHandlerOptions(
+            AccessTokenLifetime: TimeSpan.FromMinutes(45),
+            RefreshReplayLifetime: TimeSpan.FromMinutes(5)));
+        var (code, verifier, _) = await SeedAuthCodeAsync(h);
+
+        var result = await h.Handler.HandleAsync(new TokenRequest(
+            GrantType: "authorization_code",
+            ClientId: ClientId,
+            Code: code,
+            CodeVerifier: verifier,
+            RedirectUri: ClientRedirect,
+            RefreshToken: null));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(2700, result.Response!.ExpiresIn);
+
         var validation = await h.JwtIssuer.ValidateAsync(result.Response.AccessToken);
         Assert.True(validation.IsValid);
     }
@@ -248,6 +273,66 @@ public sealed class TokenHandlerTests
         var third = await h.Handler.HandleAsync(new TokenRequest(
             "refresh_token", ClientId, null, null, null, refreshed.Response.RefreshToken));
         Assert.True(third.IsSuccess);
+    }
+
+    [Fact]
+    public async Task RefreshToken_ConfiguredReplayWindow_AllowsLongerReplay()
+    {
+        var h = Create(new TokenHandlerOptions(
+            AccessTokenLifetime: TimeSpan.FromMinutes(10),
+            RefreshReplayLifetime: TimeSpan.FromMinutes(15)));
+        var (code, verifier, _) = await SeedAuthCodeAsync(h);
+
+        var initial = await h.Handler.HandleAsync(new TokenRequest(
+            "authorization_code", ClientId, code, verifier, ClientRedirect, null));
+        var firstRefresh = initial.Response!.RefreshToken;
+
+        var refreshed = await h.Handler.HandleAsync(new TokenRequest(
+            "refresh_token", ClientId, null, null, null, firstRefresh));
+        Assert.True(refreshed.IsSuccess);
+
+        h.Clock.Advance(TimeSpan.FromMinutes(10));
+
+        var replayed = await h.Handler.HandleAsync(new TokenRequest(
+            "refresh_token", ClientId, null, null, null, firstRefresh));
+        Assert.True(replayed.IsSuccess);
+        Assert.Equal(refreshed.Response!.RefreshToken, replayed.Response!.RefreshToken);
+
+        h.Clock.Advance(TimeSpan.FromMinutes(6));
+
+        var lateReplay = await h.Handler.HandleAsync(new TokenRequest(
+            "refresh_token", ClientId, null, null, null, firstRefresh));
+        Assert.False(lateReplay.IsSuccess);
+        Assert.Equal("invalid_grant", lateReplay.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData(0, 5)]
+    [InlineData(10, 0)]
+    [InlineData(1441, 5)]
+    [InlineData(10, 1441)]
+    public void Constructor_InvalidTokenHandlerOptions_Rejected(int accessMinutes, int replayMinutes)
+    {
+        var clock = new FakeTimeProvider(Epoch);
+        var store = new FakeOAuthStateStore(clock);
+        var jwtIssuer = new DevBrainJwtIssuer(
+            new DevBrainJwtIssuerOptions
+            {
+                SigningSecret = DevBrainJwtIssuer.GenerateSigningSecret(),
+                Issuer = Issuer,
+                Audience = Audience,
+                TenantId = TestTenantId,
+            },
+            clock);
+
+        Assert.Throws<InvalidOperationException>(() => new TokenHandler(
+            store,
+            jwtIssuer,
+            clock,
+            new TokenHandlerOptions(
+                AccessTokenLifetime: TimeSpan.FromMinutes(accessMinutes),
+                RefreshReplayLifetime: TimeSpan.FromMinutes(replayMinutes)),
+            logger: null));
     }
 
     [Fact]
