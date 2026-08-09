@@ -21,16 +21,8 @@ namespace DevBrain.Functions.Auth.DcrFacade;
 /// </summary>
 public sealed class TokenHandler
 {
-    // Short-lived access tokens (10 min) keep the stolen-token blast radius small without
-    // making the refresh loop noticeably expensive.
-    private static readonly TimeSpan AccessTokenLifetime = TimeSpan.FromMinutes(10);
-
     // Refresh tokens: 30 days to match the sprint spec. Rotated on every use.
     private static readonly TimeSpan RefreshTokenLifetime = TimeSpan.FromDays(30);
-
-    // Short replay window for clients that retry or restart immediately after a rotation but still
-    // present the just-rotated token from local credential cache.
-    private static readonly TimeSpan RefreshReplayLifetime = TimeSpan.FromMinutes(5);
 
     // Keep the upstream vault alive for the full local refresh window. CallbackHandler creates the
     // initial vault record; the refresh path slides it forward on every successful rotation/replay.
@@ -39,10 +31,11 @@ public sealed class TokenHandler
     private readonly IOAuthStateStore _store;
     private readonly DevBrainJwtIssuer _jwtIssuer;
     private readonly TimeProvider _timeProvider;
+    private readonly TokenHandlerOptions _options;
     private readonly ILogger<TokenHandler>? _logger;
 
     public TokenHandler(IOAuthStateStore store, DevBrainJwtIssuer jwtIssuer, TimeProvider timeProvider)
-        : this(store, jwtIssuer, timeProvider, logger: null)
+        : this(store, jwtIssuer, timeProvider, TokenHandlerOptions.Default, logger: null)
     {
     }
 
@@ -51,10 +44,22 @@ public sealed class TokenHandler
         DevBrainJwtIssuer jwtIssuer,
         TimeProvider timeProvider,
         ILogger<TokenHandler>? logger)
+        : this(store, jwtIssuer, timeProvider, TokenHandlerOptions.Default, logger)
     {
+    }
+
+    public TokenHandler(
+        IOAuthStateStore store,
+        DevBrainJwtIssuer jwtIssuer,
+        TimeProvider timeProvider,
+        TokenHandlerOptions options,
+        ILogger<TokenHandler>? logger)
+    {
+        options.Validate();
         _store = store;
         _jwtIssuer = jwtIssuer;
         _timeProvider = timeProvider;
+        _options = options;
         _logger = logger;
     }
 
@@ -137,7 +142,7 @@ public sealed class TokenHandler
         return TokenResult.Success(new TokenResponse(
             AccessToken: jwt,
             TokenType: "Bearer",
-            ExpiresIn: (int)AccessTokenLifetime.TotalSeconds,
+            ExpiresIn: (int)_options.AccessTokenLifetime.TotalSeconds,
             RefreshToken: refresh,
             Scope: "documents.readwrite"));
     }
@@ -161,7 +166,7 @@ public sealed class TokenHandler
             request.ClientId,
             replacementRefresh,
             RefreshTokenLifetime,
-            RefreshReplayLifetime,
+            _options.RefreshReplayLifetime,
             UpstreamVaultTtl);
 
         if (!rotation.Succeeded)
@@ -186,7 +191,7 @@ public sealed class TokenHandler
         return TokenResult.Success(new TokenResponse(
             AccessToken: jwt,
             TokenType: "Bearer",
-            ExpiresIn: (int)AccessTokenLifetime.TotalSeconds,
+            ExpiresIn: (int)_options.AccessTokenLifetime.TotalSeconds,
             RefreshToken: rotation.RefreshToken!,
             Scope: "documents.readwrite"));
     }
@@ -206,7 +211,7 @@ public sealed class TokenHandler
         // But DevBrainJwtIssuer.Issue doesn't accept a pre-chosen JTI. This is the one place we
         // need to side-step it and craft the token directly — or change the issuer to allow an
         // override. The cleanest fix is the override route.
-        return _jwtIssuer.IssueWithJti(subject: $"upstream-{upstreamJti}", jti: upstreamJti, lifetime: AccessTokenLifetime);
+        return _jwtIssuer.IssueWithJti(subject: $"upstream-{upstreamJti}", jti: upstreamJti, lifetime: _options.AccessTokenLifetime);
     }
 
     private async Task<string> MintAndStoreRefreshAsync(string clientId, string upstreamJti)
@@ -237,6 +242,28 @@ public sealed class TokenHandler
         Span<byte> hash = stackalloc byte[32];
         SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(token), hash);
         return Convert.ToHexString(hash[..6]).ToLowerInvariant();
+    }
+}
+
+public sealed record TokenHandlerOptions(TimeSpan AccessTokenLifetime, TimeSpan RefreshReplayLifetime)
+{
+    public static TokenHandlerOptions Default { get; } = new(
+        AccessTokenLifetime: TimeSpan.FromMinutes(10),
+        RefreshReplayLifetime: TimeSpan.FromMinutes(5));
+
+    public void Validate()
+    {
+        ValidateLifetime(nameof(AccessTokenLifetime), AccessTokenLifetime);
+        ValidateLifetime(nameof(RefreshReplayLifetime), RefreshReplayLifetime);
+    }
+
+    private static void ValidateLifetime(string name, TimeSpan lifetime)
+    {
+        if (lifetime < TimeSpan.FromMinutes(1) || lifetime > TimeSpan.FromDays(1))
+        {
+            throw new InvalidOperationException(
+                $"TokenHandlerOptions.{name} must be between 1 minute and 24 hours.");
+        }
     }
 }
 

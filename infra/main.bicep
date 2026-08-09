@@ -11,10 +11,18 @@ param environmentName string
 // lives in Key Vault, not here.
 
 @description('Entra tenant GUID (single-tenant only — not "common" or "organizations").')
+@minLength(1)
 param entraTenantId string
 
 @description('Entra app registration client ID for the single pre-registered DevBrain app.')
+@minLength(1)
 param entraClientId string
+
+@description('Optional local DevBrain access-token lifetime in whole minutes. Leave empty for the application default.')
+param oauthAccessTokenLifetimeMinutes string = ''
+
+@description('Optional rotated-refresh-token replay marker lifetime in whole minutes. Leave empty for the application default.')
+param oauthRefreshReplayLifetimeMinutes string = ''
 
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 
@@ -283,6 +291,8 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
         { name: 'OAuth__EntraClientId', value: entraClientId }
         { name: 'OAuth__EntraClientSecret', value: '@Microsoft.KeyVault(SecretUri=https://${keyVault.name}${environment().suffixes.keyvaultDns}/secrets/entra-client-secret/)' }
         { name: 'OAuth__JwtSigningSecret', value: '@Microsoft.KeyVault(SecretUri=https://${keyVault.name}${environment().suffixes.keyvaultDns}/secrets/jwt-signing-secret/)' }
+        { name: 'OAuth__AccessTokenLifetimeMinutes', value: oauthAccessTokenLifetimeMinutes }
+        { name: 'OAuth__RefreshReplayLifetimeMinutes', value: oauthRefreshReplayLifetimeMinutes }
         { name: 'KeyVault__Name', value: keyVault.name }
         // v1.6 Data Protection: key ring persisted in blob storage, protected by the KV key above.
         // Used exclusively by IUpstreamTokenProtector (purpose: DevBrain.OAuth.UpstreamToken).

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Azure.Core;
 using Azure.Identity;
@@ -60,6 +61,9 @@ EnsureConfig(startupConfig, "OAuth:EntraClientId");
 EnsureConfig(startupConfig, "OAuth:EntraClientSecret");
 EnsureConfig(startupConfig, "DataProtection:BlobUri");
 EnsureConfig(startupConfig, "DataProtection:KeyVaultKeyUri");
+
+var tokenHandlerOptions = BuildTokenHandlerOptions(startupConfig);
+builder.Services.AddSingleton(tokenHandlerOptions);
 
 builder.Services.AddSingleton(sp =>
 {
@@ -171,7 +175,14 @@ builder.UseMiddleware<InvocationDiagnosticMiddleware>();
 builder.UseWhen<McpJwtValidationMiddleware>(ctx =>
     ctx.FunctionDefinition.InputBindings.Values.Any(b => b.Type == "mcpToolTrigger"));
 
-builder.Build().Run();
+var host = builder.Build();
+var startupLogger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("DevBrain.Startup");
+startupLogger.LogInformation(
+    "OAuth token windows configured accessTokenLifetimeMinutes={AccessTokenLifetimeMinutes} refreshReplayLifetimeMinutes={RefreshReplayLifetimeMinutes}",
+    (int)tokenHandlerOptions.AccessTokenLifetime.TotalMinutes,
+    (int)tokenHandlerOptions.RefreshReplayLifetime.TotalMinutes);
+
+host.Run();
 
 static void EnsureConfig(IConfiguration config, string key)
 {
@@ -180,4 +191,37 @@ static void EnsureConfig(IConfiguration config, string key)
         throw new InvalidOperationException($"Required configuration value '{key}' is missing or empty. " +
             "Set it via app settings, environment variable (double-underscore form), or local.settings.json.");
     }
+}
+
+static TokenHandlerOptions BuildTokenHandlerOptions(IConfiguration config)
+{
+    var options = new TokenHandlerOptions(
+        AccessTokenLifetime: TimeSpan.FromMinutes(ReadOptionalWholeMinutes(
+            config,
+            "OAuth:AccessTokenLifetimeMinutes",
+            (int)TokenHandlerOptions.Default.AccessTokenLifetime.TotalMinutes)),
+        RefreshReplayLifetime: TimeSpan.FromMinutes(ReadOptionalWholeMinutes(
+            config,
+            "OAuth:RefreshReplayLifetimeMinutes",
+            (int)TokenHandlerOptions.Default.RefreshReplayLifetime.TotalMinutes)));
+
+    options.Validate();
+    return options;
+}
+
+static int ReadOptionalWholeMinutes(IConfiguration config, string key, int defaultValue)
+{
+    var value = config[key];
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return defaultValue;
+    }
+
+    if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var minutes))
+    {
+        throw new InvalidOperationException(
+            $"Configuration value '{key}' must be a whole number of minutes.");
+    }
+
+    return minutes;
 }
