@@ -1,7 +1,5 @@
 # DevBrain v1 — Sprint Spec
 
-> **Historical planning document.** This records the original v1 scope and is not the current operational architecture. See the repository README and implementation for the deployed design.
-
 **Repository:** `github.com/Ignite-Solutions-Group/devbrain`  
 **Purpose:** A remote MCP server that gives any AI tool (Claude web, Claude Code CLI, GitHub Copilot, Cursor) persistent, shared access to developer knowledge — sprint docs, architecture decisions, project state. One brain. Zero upload tax.  
 **Stack:** .NET 10 · C# 14 · Azure Functions (isolated worker) · Cosmos DB NoSQL · Entra ID · Bicep · `azd`  
@@ -91,7 +89,7 @@ Partition key path: `/key`. The `id` and `key` fields are always identical — t
 
 ## MCP Tools
 
-The original four tools are implemented in `DocumentTools.cs` using `[McpToolTrigger]` and `[McpToolProperty]` from `Microsoft.Azure.Functions.Worker.Extensions.Mcp`. DevBrain does not register a second MCP server from the official `ModelContextProtocol` C# SDK in the isolated worker process; the Azure Functions host extension owns the MCP wire protocol and dispatches tool invocations to the worker.
+All four tools are implemented in `DocumentTools.cs` using `[McpToolTrigger]` attributes from `Microsoft.Azure.Functions.Worker.Extensions.Mcp`.
 
 ### `UpsertDocument`
 
@@ -155,7 +153,7 @@ Authentication is handled by Azure Functions' built-in Easy Auth (App Service Au
 <PackageReference Include="Microsoft.Extensions.Azure" />
 ```
 
-Use current stable/GA versions. The current package versions are recorded in `DevBrain.Functions.csproj`.
+Use current stable/GA versions. `Microsoft.Azure.Functions.Worker.Extensions.Mcp` is GA as of late 2025.
 
 ---
 
