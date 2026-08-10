@@ -30,12 +30,12 @@ public sealed class CallbackHandlerTests
         FakeUpstreamOAuthClient Upstream,
         FakeTimeProvider Clock);
 
-    private static Harness Create()
+    private static Harness Create(RecordingLogger<CallbackHandler>? logger = null)
     {
         var clock = new FakeTimeProvider(Epoch);
         var store = new FakeOAuthStateStore(clock);
         var upstream = new FakeUpstreamOAuthClient();
-        var handler = new CallbackHandler(store, upstream, clock);
+        var handler = new CallbackHandler(store, upstream, clock, logger);
         return new Harness(handler, store, upstream, clock);
     }
 
@@ -163,6 +163,33 @@ public sealed class CallbackHandlerTests
 
         // Transaction is consumed so the error can't be replayed.
         Assert.Null(await h.Store.GetTransactionAsync(UpstreamState));
+    }
+
+    [Fact]
+    public async Task Diagnostics_DoNotRenderRawCallbackErrors()
+    {
+        var logger = new RecordingLogger<CallbackHandler>();
+        var h = Create(logger);
+        await SeedTransactionAsync(h);
+        const string maliciousDescription = "User cancelled\r\nFORGED-CALLBACK-LOG";
+
+        var result = await h.Handler.HandleAsync(new CallbackRequest(
+            Code: null,
+            State: UpstreamState,
+            Error: "access_denied",
+            ErrorDescription: maliciousDescription));
+
+        Assert.Equal(CallbackResultKind.Redirect, result.Kind);
+        Assert.Equal(
+            maliciousDescription,
+            HttpUtility.ParseQueryString(result.RedirectTo!.Query)["error_description"]);
+        Assert.NotEmpty(logger.Messages);
+        Assert.All(logger.Messages, message =>
+        {
+            Assert.DoesNotContain(maliciousDescription, message, StringComparison.Ordinal);
+            Assert.DoesNotContain('\r', message);
+            Assert.DoesNotContain('\n', message);
+        });
     }
 
     [Fact]

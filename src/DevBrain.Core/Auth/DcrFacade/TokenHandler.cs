@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using DevBrain.Core.Auth.Crypto;
+using DevBrain.Core.Auth.Logging;
 using DevBrain.Core.Auth.Models;
 using DevBrain.Core.Auth.Services;
 using Microsoft.Extensions.Logging;
@@ -79,8 +80,12 @@ public sealed class TokenHandler
     public Task<TokenResult> HandleAsync(TokenRequest request)
     {
         _logger?.LogInformation(
-            "TokenHandler: request received grantType={GrantType} clientId={ClientId} hasCode={HasCode} hasRefreshToken={HasRefreshToken}",
-            request.GrantType, request.ClientId, !string.IsNullOrEmpty(request.Code), !string.IsNullOrEmpty(request.RefreshToken));
+            "TokenHandler: request received authorizationCodeGrant={AuthorizationCodeGrant} refreshTokenGrant={RefreshTokenGrant} clientIdFingerprint={ClientIdFingerprint} hasCode={HasCode} hasRefreshToken={HasRefreshToken}",
+            string.Equals(request.GrantType, "authorization_code", StringComparison.Ordinal),
+            string.Equals(request.GrantType, "refresh_token", StringComparison.Ordinal),
+            OAuthLogValue.Fingerprint(request.ClientId),
+            !string.IsNullOrEmpty(request.Code),
+            !string.IsNullOrEmpty(request.RefreshToken));
 
         return request.GrantType switch
         {
@@ -92,7 +97,7 @@ public sealed class TokenHandler
 
     private Task<TokenResult> LogAndReturnUnsupported(string grantType)
     {
-        _logger?.LogWarning("TokenHandler: rejected — unsupported grant_type={GrantType}", grantType);
+        _logger?.LogWarning("TokenHandler: rejected — unsupported grant_type");
         return Task.FromResult(TokenResult.Error("unsupported_grant_type", $"grant_type '{grantType}' is not supported."));
     }
 
@@ -126,8 +131,9 @@ public sealed class TokenHandler
         if (!string.Equals(code.ClientId, request.ClientId, StringComparison.Ordinal))
         {
             _logger?.LogWarning(
-                "TokenHandler/authcode: rejected — client binding mismatch codeClientId={CodeClientId} requestClientId={RequestClientId}",
-                code.ClientId, request.ClientId);
+                "TokenHandler/authcode: rejected — client binding mismatch codeClientIdFingerprint={CodeClientIdFingerprint} requestClientIdFingerprint={RequestClientIdFingerprint}",
+                OAuthLogValue.Fingerprint(code.ClientId),
+                OAuthLogValue.Fingerprint(request.ClientId));
             return TokenResult.Error("invalid_grant", "Authorization code was issued to a different client.");
         }
 
@@ -156,8 +162,9 @@ public sealed class TokenHandler
         var refresh = await MintAndStoreRefreshAsync(code.ClientId, upstreamJti, code.Resource);
 
         _logger?.LogInformation(
-            "TokenHandler/authcode: issued access+refresh clientId={ClientId} upstreamJti={Jti}",
-            code.ClientId, upstreamJti);
+            "TokenHandler/authcode: issued access+refresh clientIdFingerprint={ClientIdFingerprint} upstreamJtiFingerprint={JtiFingerprint}",
+            OAuthLogValue.Fingerprint(code.ClientId),
+            OAuthLogValue.Fingerprint(upstreamJti));
 
         return TokenResult.Success(new TokenResponse(
             AccessToken: jwt,
@@ -193,8 +200,10 @@ public sealed class TokenHandler
         if (!rotation.Succeeded)
         {
             _logger?.LogWarning(
-                "TokenHandler/refresh: rejected reason={Reason} clientId={ClientId} refreshTokenFingerprint={RefreshTokenFingerprint}",
-                rotation.LogCode, request.ClientId, FingerprintToken(request.RefreshToken));
+                "TokenHandler/refresh: rejected reason={Reason} clientIdFingerprint={ClientIdFingerprint} refreshTokenFingerprint={RefreshTokenFingerprint}",
+                rotation.LogCode,
+                OAuthLogValue.Fingerprint(request.ClientId),
+                OAuthLogValue.Fingerprint(request.RefreshToken));
             return TokenResult.Error("invalid_grant", "refresh_token is invalid, expired, already rotated outside the replay window, or bound to a different client.");
         }
 
@@ -210,12 +219,12 @@ public sealed class TokenHandler
         var (jwt, _) = IssueJwtForUpstream(upstreamJti);
 
         _logger?.LogInformation(
-            "TokenHandler/refresh: {RotationKind} refresh clientId={ClientId} upstreamJti={Jti} refreshTokenFingerprint={RefreshTokenFingerprint} returnedRefreshTokenFingerprint={ReturnedRefreshTokenFingerprint}",
+            "TokenHandler/refresh: {RotationKind} refresh clientIdFingerprint={ClientIdFingerprint} upstreamJtiFingerprint={JtiFingerprint} refreshTokenFingerprint={RefreshTokenFingerprint} returnedRefreshTokenFingerprint={ReturnedRefreshTokenFingerprint}",
             rotation.IsReplay ? "replayed" : "rotated",
-            request.ClientId,
-            upstreamJti,
-            FingerprintToken(request.RefreshToken),
-            FingerprintToken(rotation.RefreshToken!));
+            OAuthLogValue.Fingerprint(request.ClientId),
+            OAuthLogValue.Fingerprint(upstreamJti),
+            OAuthLogValue.Fingerprint(request.RefreshToken),
+            OAuthLogValue.Fingerprint(rotation.RefreshToken));
 
         return TokenResult.Success(new TokenResponse(
             AccessToken: jwt,
@@ -231,8 +240,8 @@ public sealed class TokenHandler
         if (existing is null || string.IsNullOrEmpty(existing.Envelope.RefreshToken))
         {
             _logger?.LogWarning(
-                "TokenHandler/refresh: rejected reason=upstream_refresh_missing upstreamJti={Jti}",
-                upstreamJti);
+                "TokenHandler/refresh: rejected reason=upstream_refresh_missing upstreamJtiFingerprint={JtiFingerprint}",
+                OAuthLogValue.Fingerprint(upstreamJti));
             await RevokeUpstreamSessionAsync(upstreamJti);
             return false;
         }
@@ -246,8 +255,8 @@ public sealed class TokenHandler
         {
             _logger?.LogWarning(
                 ex,
-                "TokenHandler/refresh: rejected reason=upstream_refresh_failed upstreamJti={Jti}",
-                upstreamJti);
+                "TokenHandler/refresh: rejected reason=upstream_refresh_failed upstreamJtiFingerprint={JtiFingerprint}",
+                OAuthLogValue.Fingerprint(upstreamJti));
             await RevokeUpstreamSessionAsync(upstreamJti);
             return false;
         }
@@ -256,8 +265,8 @@ public sealed class TokenHandler
             || !string.Equals(refreshed.ObjectId, existing.ObjectId, StringComparison.OrdinalIgnoreCase))
         {
             _logger?.LogWarning(
-                "TokenHandler/refresh: rejected reason=upstream_identity_changed upstreamJti={Jti}",
-                upstreamJti);
+                "TokenHandler/refresh: rejected reason=upstream_identity_changed upstreamJtiFingerprint={JtiFingerprint}",
+                OAuthLogValue.Fingerprint(upstreamJti));
             await RevokeUpstreamSessionAsync(upstreamJti);
             return false;
         }
@@ -282,8 +291,8 @@ public sealed class TokenHandler
         {
             _logger?.LogWarning(
                 ex,
-                "TokenHandler/refresh: rejected reason=upstream_refresh_persist_failed upstreamJti={Jti}",
-                upstreamJti);
+                "TokenHandler/refresh: rejected reason=upstream_refresh_persist_failed upstreamJtiFingerprint={JtiFingerprint}",
+                OAuthLogValue.Fingerprint(upstreamJti));
             await RevokeUpstreamSessionAsync(upstreamJti);
             return false;
         }
@@ -299,8 +308,8 @@ public sealed class TokenHandler
         {
             _logger?.LogError(
                 ex,
-                "TokenHandler/refresh: failed to revoke upstream session upstreamJti={Jti}",
-                upstreamJti);
+                "TokenHandler/refresh: failed to revoke upstream session upstreamJtiFingerprint={JtiFingerprint}",
+                OAuthLogValue.Fingerprint(upstreamJti));
         }
     }
 
@@ -346,12 +355,6 @@ public sealed class TokenHandler
         return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
-    private static string FingerprintToken(string token)
-    {
-        Span<byte> hash = stackalloc byte[32];
-        SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(token), hash);
-        return Convert.ToHexString(hash[..6]).ToLowerInvariant();
-    }
 }
 
 public sealed record TokenHandlerOptions(TimeSpan AccessTokenLifetime, TimeSpan RefreshReplayLifetime)

@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using DevBrain.Core.Auth.DcrFacade;
 using DevBrain.Functions.Tests.Auth.Services;
+using DevBrain.Functions.Tests.TestHelpers;
 using Microsoft.Extensions.Time.Testing;
 
 namespace DevBrain.Functions.Tests.Auth.DcrFacade;
@@ -15,11 +16,12 @@ public sealed class RegistrationHandlerTests
 {
     private static readonly DateTimeOffset Epoch = new(2026, 4, 11, 0, 0, 0, TimeSpan.Zero);
 
-    private static (RegistrationHandler handler, FakeOAuthStateStore store, FakeTimeProvider clock) Create()
+    private static (RegistrationHandler handler, FakeOAuthStateStore store, FakeTimeProvider clock) Create(
+        RecordingLogger<RegistrationHandler>? logger = null)
     {
         var clock = new FakeTimeProvider(Epoch);
         var store = new FakeOAuthStateStore(clock);
-        var handler = new RegistrationHandler(store, clock);
+        var handler = new RegistrationHandler(store, clock, logger);
         return (handler, store, clock);
     }
 
@@ -82,6 +84,28 @@ public sealed class RegistrationHandlerTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("invalid_redirect_uri", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task Diagnostics_DoNotRenderRawRegistrationValues()
+    {
+        var logger = new RecordingLogger<RegistrationHandler>();
+        var (handler, _, _) = Create(logger);
+        const string maliciousName = "Client\r\nFORGED-REGISTRATION-LOG";
+
+        var result = await handler.HandleAsync(new RegistrationRequest(
+            ["javascript:alert(1)\r\nFORGED-REDIRECT-LOG"],
+            maliciousName));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("invalid_redirect_uri", result.ErrorCode);
+        Assert.NotEmpty(logger.Messages);
+        Assert.All(logger.Messages, message =>
+        {
+            Assert.DoesNotContain("FORGED", message, StringComparison.Ordinal);
+            Assert.DoesNotContain('\r', message);
+            Assert.DoesNotContain('\n', message);
+        });
     }
 
     [Fact]

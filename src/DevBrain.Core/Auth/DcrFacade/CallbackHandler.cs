@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using DevBrain.Core.Auth.Logging;
 using DevBrain.Core.Auth.Models;
 using DevBrain.Core.Auth.Services;
 using Microsoft.Extensions.Logging;
@@ -68,8 +69,9 @@ public sealed class CallbackHandler
         if (!string.IsNullOrEmpty(request.Error))
         {
             _logger?.LogWarning(
-                "CallbackHandler: upstream returned error={UpstreamError} description={UpstreamErrorDescription}",
-                request.Error, request.ErrorDescription);
+                "CallbackHandler: upstream returned errorFingerprint={UpstreamErrorFingerprint} hasDescription={HasDescription}",
+                OAuthLogValue.Fingerprint(request.Error),
+                !string.IsNullOrEmpty(request.ErrorDescription));
             var errorTxn = await _store.GetTransactionAsync(request.State ?? string.Empty);
             if (errorTxn is null)
             {
@@ -97,8 +99,8 @@ public sealed class CallbackHandler
         if (transaction is null)
         {
             _logger?.LogWarning(
-                "CallbackHandler: rejected — transaction not found or expired state={State}",
-                request.State);
+                "CallbackHandler: rejected — transaction not found or expired stateFingerprint={StateFingerprint}",
+                OAuthLogValue.Fingerprint(request.State));
             return CallbackResult.LocalError("invalid_state", "Unknown or expired transaction state.");
         }
 
@@ -116,8 +118,9 @@ public sealed class CallbackHandler
             // surfaces in logs and error reporting. The transaction is still consumed so an
             // attacker can't replay the same state.
             _logger?.LogError(ex,
-                "CallbackHandler: id_token validation failed clientId={ClientId} upstreamState={UpstreamState}",
-                transaction.ClientId, transaction.UpstreamState);
+                "CallbackHandler: id_token validation failed clientIdFingerprint={ClientIdFingerprint} upstreamStateFingerprint={UpstreamStateFingerprint}",
+                OAuthLogValue.Fingerprint(transaction.ClientId),
+                OAuthLogValue.Fingerprint(transaction.UpstreamState));
             await _store.DeleteTransactionAsync(transaction.UpstreamState);
             return CallbackResult.LocalError("invalid_grant", $"id_token validation failed: {ex.Message}");
         }
@@ -126,8 +129,9 @@ public sealed class CallbackHandler
             // Forward upstream transport/grant failure to the client with a generic error. We don't
             // leak the upstream error body — it could reveal tenant internals.
             _logger?.LogError(ex,
-                "CallbackHandler: upstream token exchange failed clientId={ClientId} upstreamState={UpstreamState}",
-                transaction.ClientId, transaction.UpstreamState);
+                "CallbackHandler: upstream token exchange failed clientIdFingerprint={ClientIdFingerprint} upstreamStateFingerprint={UpstreamStateFingerprint}",
+                OAuthLogValue.Fingerprint(transaction.ClientId),
+                OAuthLogValue.Fingerprint(transaction.UpstreamState));
             await _store.DeleteTransactionAsync(transaction.UpstreamState);
             return CallbackResult.RedirectToClient(BuildClientErrorRedirect(
                 transaction,
@@ -180,8 +184,10 @@ public sealed class CallbackHandler
         await _store.DeleteTransactionAsync(transaction.UpstreamState);
 
         _logger?.LogInformation(
-            "CallbackHandler: success clientId={ClientId} upstreamJti={Jti} upn={Upn} — minted devbrain auth code, redirecting to client",
-            transaction.ClientId, jti, upstreamTokens.UserPrincipalName);
+            "CallbackHandler: success clientIdFingerprint={ClientIdFingerprint} upstreamJtiFingerprint={JtiFingerprint} upnFingerprint={UpnFingerprint} — minted devbrain auth code, redirecting to client",
+            OAuthLogValue.Fingerprint(transaction.ClientId),
+            OAuthLogValue.Fingerprint(jti),
+            OAuthLogValue.Fingerprint(upstreamTokens.UserPrincipalName));
 
         var redirect = BuildClientSuccessRedirect(transaction, devbrainCode);
         return CallbackResult.RedirectToClient(redirect);

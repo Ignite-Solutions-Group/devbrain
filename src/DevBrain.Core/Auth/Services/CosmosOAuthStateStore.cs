@@ -519,7 +519,7 @@ public sealed class CosmosOAuthStateStore : IOAuthStateStore
                 && ex.StatusCode != System.Net.HttpStatusCode.PreconditionFailed)
             {
                 System.Diagnostics.Trace.TraceWarning(
-                    $"CosmosOAuthStateStore.TryDeleteAsync: unexpected CosmosException {ex.StatusCode} for key '{key}': {ex.Message}");
+                    $"CosmosOAuthStateStore.TryDeleteAsync: unexpected CosmosException status={ex.StatusCode}");
             }
         }
     }
