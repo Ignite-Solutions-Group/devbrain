@@ -1,6 +1,6 @@
 using System.Text.Json;
-using DevBrain.Functions.Models;
-using DevBrain.Functions.Services;
+using DevBrain.Core.Models;
+using DevBrain.Core.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Extensions.Mcp;
 

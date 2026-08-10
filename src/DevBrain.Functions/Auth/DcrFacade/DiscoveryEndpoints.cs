@@ -65,6 +65,7 @@ public sealed class DiscoveryEndpoints
             GrantTypesSupported: ["authorization_code", "refresh_token"],
             CodeChallengeMethodsSupported: ["S256"],
             TokenEndpointAuthMethodsSupported: ["none"],
+            AuthorizationResponseIssParameterSupported: true,
             ScopesSupported: ["documents.readwrite"]);
 
         return await WriteJsonAsync(req, metadata);
@@ -110,6 +111,7 @@ public sealed class DiscoveryEndpoints
         [property: JsonPropertyName("grant_types_supported")] string[] GrantTypesSupported,
         [property: JsonPropertyName("code_challenge_methods_supported")] string[] CodeChallengeMethodsSupported,
         [property: JsonPropertyName("token_endpoint_auth_methods_supported")] string[] TokenEndpointAuthMethodsSupported,
+        [property: JsonPropertyName("authorization_response_iss_parameter_supported")] bool AuthorizationResponseIssParameterSupported,
         [property: JsonPropertyName("scopes_supported")] string[] ScopesSupported);
 
     internal sealed record ProtectedResourceMetadata(

@@ -1,6 +1,6 @@
-using DevBrain.Functions.Auth.Middleware;
-using DevBrain.Functions.Auth.Models;
-using DevBrain.Functions.Auth.Services;
+using DevBrain.Core.Auth.Middleware;
+using DevBrain.Core.Auth.Models;
+using DevBrain.Core.Auth.Services;
 using DevBrain.Functions.Tests.Auth.Services;
 using Microsoft.Extensions.Time.Testing;
 
@@ -58,6 +58,7 @@ public sealed class JwtAuthenticatorTests
             UserPrincipalName = upn,
             ObjectId = "00000000-0000-0000-0000-000000000001",
             TenantId = tenantId,
+            Roles = ["DevBrain.User"],
             CreatedAt = Epoch,
             ExpiresAt = Epoch.AddHours(1),
         });
@@ -82,6 +83,7 @@ public sealed class JwtAuthenticatorTests
         Assert.Equal("derek@ignitesolutions.group", principal.FindFirst("preferred_username")!.Value);
         Assert.Equal("00000000-0000-0000-0000-000000000001", principal.FindFirst("oid")!.Value);
         Assert.Equal(TenantA, principal.FindFirst("tid")!.Value);
+        Assert.True(principal.IsInRole("DevBrain.User"));
     }
 
     /// <summary>Gate #8: cross-tenant rejection with zero state store reads.</summary>

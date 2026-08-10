@@ -1,6 +1,6 @@
 using System.Net;
 using System.Text.Json;
-using DevBrain.Functions.Auth.Services;
+using DevBrain.Core.Auth.Services;
 using DevBrain.Functions.Tests.TestHelpers;
 
 namespace DevBrain.Functions.Tests.Auth.Services;
@@ -58,6 +58,7 @@ public sealed class EntraOAuthClientIdTokenValidationTests
         ["preferred_username"] = "derek@ignitesolutions.group",
         ["oid"] = "00000000-0000-0000-0000-000000000001",
         ["tid"] = TenantGuid,
+        ["roles"] = new[] { "DevBrain.User" },
     };
 
     /// <summary>Gate #10 / happy path — properly signed, issued, audienced, and unexpired token passes.</summary>
@@ -77,6 +78,7 @@ public sealed class EntraOAuthClientIdTokenValidationTests
 
         Assert.Equal("derek@ignitesolutions.group", result.UserPrincipalName);
         Assert.Equal(TenantGuid, result.TenantId);
+        Assert.Contains("DevBrain.User", result.Roles ?? []);
     }
 
     /// <summary>Gate #10 / wrong signing key — validator's key ring doesn't match the token's signature.</summary>

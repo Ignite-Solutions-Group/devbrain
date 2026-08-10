@@ -1,5 +1,5 @@
-using DevBrain.Functions.Auth.Models;
-using DevBrain.Functions.Auth.Services;
+using DevBrain.Core.Auth.Models;
+using DevBrain.Core.Auth.Services;
 using DevBrain.Functions.Tests.TestHelpers;
 
 namespace DevBrain.Functions.Tests.Auth.Services;
@@ -159,6 +159,7 @@ public sealed class FakeOAuthStateStore : IOAuthStateStore
                 UserPrincipalName = token.UserPrincipalName,
                 ObjectId = token.ObjectId,
                 TenantId = token.TenantId,
+                Roles = token.Roles.ToArray(),
                 CreatedAt = token.CreatedAt,
                 ExpiresAt = token.ExpiresAt,
                 Ttl = token.Ttl,
@@ -184,6 +185,7 @@ public sealed class FakeOAuthStateStore : IOAuthStateStore
                 UserPrincipalName = dto.UserPrincipalName,
                 ObjectId = dto.ObjectId,
                 TenantId = dto.TenantId,
+                Roles = dto.Roles,
                 CreatedAt = dto.CreatedAt,
                 ExpiresAt = dto.ExpiresAt,
                 Ttl = dto.Ttl,
@@ -208,6 +210,7 @@ public sealed class FakeOAuthStateStore : IOAuthStateStore
         public string UserPrincipalName { get; set; } = string.Empty;
         public string ObjectId { get; set; } = string.Empty;
         public string TenantId { get; set; } = string.Empty;
+        public string[] Roles { get; set; } = [];
         public DateTimeOffset CreatedAt { get; set; }
         public DateTimeOffset ExpiresAt { get; set; }
         public int Ttl { get; set; }
@@ -248,7 +251,8 @@ public sealed class FakeOAuthStateStore : IOAuthStateStore
         string replacementRefreshToken,
         TimeSpan replacementLifetime,
         TimeSpan replayLifetime,
-        TimeSpan upstreamVaultLifetime)
+        TimeSpan upstreamVaultLifetime,
+        string? resource = null)
     {
         lock (_lock)
         {
@@ -270,6 +274,12 @@ public sealed class FakeOAuthStateStore : IOAuthStateStore
             if (!string.Equals(record.ClientId, clientId, StringComparison.Ordinal))
             {
                 return Task.FromResult(RefreshRotationResult.Rejected(RefreshRotationOutcome.WrongClient));
+            }
+            if (!string.IsNullOrEmpty(resource)
+                && !string.IsNullOrEmpty(record.Resource)
+                && !string.Equals(record.Resource, resource, StringComparison.Ordinal))
+            {
+                return Task.FromResult(RefreshRotationResult.Rejected(RefreshRotationOutcome.WrongResource));
             }
 
             if (record.IsReplayMarker)
@@ -298,6 +308,7 @@ public sealed class FakeOAuthStateStore : IOAuthStateStore
                 RefreshToken = replacementRefreshToken,
                 ClientId = record.ClientId,
                 UpstreamJti = record.UpstreamJti,
+                Resource = record.Resource,
                 CreatedAt = now,
                 ExpiresAt = now + replacementLifetime,
                 Ttl = (int)replacementLifetime.TotalSeconds,
@@ -308,6 +319,7 @@ public sealed class FakeOAuthStateStore : IOAuthStateStore
                 RefreshToken = refreshToken,
                 ClientId = record.ClientId,
                 UpstreamJti = record.UpstreamJti,
+                Resource = record.Resource,
                 CreatedAt = record.CreatedAt,
                 ExpiresAt = now + replayLifetime,
                 RotatedAt = now,
