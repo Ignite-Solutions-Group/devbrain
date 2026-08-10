@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using DevBrain.Functions.Auth.DcrFacade;
+using DevBrain.Core.Auth.DcrFacade;
 using DevBrain.Functions.Tests.Auth.Services;
 using Microsoft.Extensions.Time.Testing;
 
@@ -37,12 +37,14 @@ public sealed class RegistrationHandlerTests
         Assert.NotEmpty(result.Response.ClientId);
         Assert.Equal("Claude Code CLI", result.Response.ClientName);
         Assert.Equal(["https://localhost:8000/callback"], result.Response.RedirectUris);
+        Assert.Equal("web", result.Response.ApplicationType);
         Assert.Equal("none", result.Response.TokenEndpointAuthMethod);
         Assert.Equal(Epoch.ToUnixTimeSeconds(), result.Response.ClientIdIssuedAt);
 
         var stored = await store.GetClientAsync(result.Response.ClientId);
         Assert.NotNull(stored);
         Assert.Equal("Claude Code CLI", stored.ClientName);
+        Assert.Equal("web", stored.ApplicationType);
     }
 
     [Fact]
@@ -83,6 +85,49 @@ public sealed class RegistrationHandlerTests
     }
 
     [Fact]
+    public async Task NativeApplicationType_IsPersisted()
+    {
+        var (handler, store, _) = Create();
+
+        var result = await handler.HandleAsync(new RegistrationRequest(
+            ["http://127.0.0.1:43123/callback"],
+            "Desktop Client",
+            ApplicationType: "native"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("native", result.Response!.ApplicationType);
+        Assert.Equal("native", (await store.GetClientAsync(result.Response.ClientId))!.ApplicationType);
+    }
+
+    [Fact]
+    public async Task NonLoopbackHttpRedirect_IsRejected()
+    {
+        var (handler, _, _) = Create();
+
+        var result = await handler.HandleAsync(new RegistrationRequest(
+            ["http://example.com/callback"],
+            "Unsafe Client",
+            ApplicationType: "native"));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("invalid_redirect_uri", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task UnknownApplicationType_IsRejected()
+    {
+        var (handler, _, _) = Create();
+
+        var result = await handler.HandleAsync(new RegistrationRequest(
+            ["https://example.com/callback"],
+            "Client",
+            ApplicationType: "service"));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("invalid_client_metadata", result.ErrorCode);
+    }
+
+    [Fact]
     public async Task SubsequentCalls_ReturnDistinctClientIds()
     {
         var (handler, _, _) = Create();
@@ -112,6 +157,7 @@ public sealed class RegistrationHandlerTests
         {
             "redirect_uris": ["https://localhost:8000/callback", "http://localhost:8000/oauth/callback"],
             "client_name": "Claude Desktop",
+            "application_type": "native",
             "token_endpoint_auth_method": "none",
             "grant_types": ["authorization_code", "refresh_token"],
             "response_types": ["code"]
@@ -122,6 +168,7 @@ public sealed class RegistrationHandlerTests
 
         Assert.NotNull(request);
         Assert.Equal("Claude Desktop", request.ClientName);
+        Assert.Equal("native", request.ApplicationType);
         Assert.NotNull(request.RedirectUris);
         Assert.Equal(2, request.RedirectUris.Length);
         Assert.Equal("https://localhost:8000/callback", request.RedirectUris[0]);

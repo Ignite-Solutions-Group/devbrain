@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
-using DevBrain.Functions.Auth.Models;
-using DevBrain.Functions.Auth.Services;
+using DevBrain.Core.Auth.Models;
+using DevBrain.Core.Auth.Services;
 using Microsoft.AspNetCore.DataProtection;
 
 namespace DevBrain.Functions.Tests.Auth.Services;

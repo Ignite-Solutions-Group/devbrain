@@ -1,7 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using DevBrain.Functions.Auth.Services;
+using DevBrain.Core.Auth.Services;
 using DevBrain.Functions.Tests.TestHelpers;
 
 namespace DevBrain.Functions.Tests.Auth.Services;

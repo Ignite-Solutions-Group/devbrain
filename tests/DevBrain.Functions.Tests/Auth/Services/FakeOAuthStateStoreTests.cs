@@ -1,5 +1,5 @@
-using DevBrain.Functions.Auth.Models;
-using DevBrain.Functions.Auth.Services;
+using DevBrain.Core.Auth.Models;
+using DevBrain.Core.Auth.Services;
 using DevBrain.Functions.Tests.TestHelpers;
 using Microsoft.Extensions.Time.Testing;
 

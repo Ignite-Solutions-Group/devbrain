@@ -1,8 +1,11 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/DevBrain.Core/DevBrain.Core.csproj" />
     <Project Path="src/DevBrain.Functions/DevBrain.Functions.csproj" />
+    <Project Path="src/DevBrain.Server/DevBrain.Server.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/DevBrain.Functions.Tests/DevBrain.Functions.Tests.csproj" />
+    <Project Path="tests/DevBrain.Server.Tests/DevBrain.Server.Tests.csproj" />
   </Folder>
 </Solution>

@@ -27,3 +27,23 @@ jobs:
       - name: Test
         run: dotnet test --no-build --verbosity normal
         if: hashFiles('**/*Tests*.csproj') != ''
+
+      - name: Build infrastructure template
+        run: az bicep build --file infra/main.bicep
+
+      - name: Validate provisioning hook syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [Management.Automation.Language.Parser]::ParseFile(
+            "$PWD/scripts/complete-container-app-provision.ps1",
+            [ref]$tokens,
+            [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_ }
+            exit 1
+          }
+
+      - name: Build v2 container image
+        run: docker build --file src/DevBrain.Server/Dockerfile .

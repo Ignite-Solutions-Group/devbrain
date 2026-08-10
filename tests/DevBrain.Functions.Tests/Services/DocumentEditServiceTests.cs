@@ -1,5 +1,5 @@
-using DevBrain.Functions.Models;
-using DevBrain.Functions.Services;
+using DevBrain.Core.Models;
+using DevBrain.Core.Services;
 
 namespace DevBrain.Functions.Tests.Services;
 
@@ -250,8 +250,6 @@ public sealed class DocumentEditServiceTests
                 ContentLength = document.ContentLength
             });
         }
-
-        public Task<int> TouchAllAsync() => Task.FromResult(_documents.Count);
 
         public Task<bool> DeleteAsync(string key, string project) =>
             Task.FromResult(_documents.Remove((key, project)));

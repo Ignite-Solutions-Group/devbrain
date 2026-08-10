@@ -4,27 +4,54 @@ All notable changes to DevBrain are tracked in this file. Versions follow [Seman
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-08-09
+
+DevBrain 2.0 introduces a standalone ASP.NET Core host on Azure Container Apps while retaining the Azure Functions host as an explicitly temporary compatibility target for side-by-side client validation.
+
+### Added
+
+- Added `DevBrain.Server`, a .NET 10 Minimal API host using `ModelContextProtocol.AspNetCore` 2.1.0 and the 2026-07-28 MCP specification revision. Its Streamable HTTP transport is stateless and exposed at `/mcp`.
+- Added a shared `DevBrain.Core` library for the Cosmos document services and OAuth/DCR implementation used by both hosting models.
+- Added application-owned ASP.NET Core authentication for the complete MCP protocol surface. Unauthenticated MCP requests receive `401` with a `WWW-Authenticate: Bearer resource_metadata="..."` challenge, removing the Functions host-layer blocker for clients such as VS Code and GitHub Copilot.
+- Added single-tenant `DevBrain.User` app-role enforcement. Validated Entra role claims are persisted with the local OAuth session and rehydrated into the caller principal.
+- Added an anonymous `/healthz` process/readiness endpoint, configurable per-caller rate limiting, an explicit request-body limit, and optional explicit-origin CORS configuration.
+- Added Azure Container Apps infrastructure with native HTTPS ingress, a Basic Azure Container Registry, managed identity, Key Vault secret references, Application Insights OpenTelemetry, and `0`–`3` replica defaults at `0.5` vCPU / `1 GiB`.
+- Added a v2-specific Data Protection key ring and `v2:` OAuth-state key namespace while reusing the existing `documents` and `oauth_state` Cosmos containers. No Redis or additional Cosmos throughput is required.
+- Added server integration tests for `/healthz`, protected-resource metadata, the MCP authentication challenge, app-role authorization, and all 12 published tool contracts.
+
+### Removed
+
+- Removed the one-shot `/ops/touch` maintenance endpoint and its `TouchAllAsync` store operation.
+- Removed the legacy function-key/SSE seed script; seed documents through any authenticated MCP client with `UpsertDocument`.
+
 ### Fixed
 - Hardened the OAuth `refresh_token` grant for MCP clients that retry or restart while their local credential cache is catching up to token rotation. A successful refresh now leaves a short replay marker for the old refresh token, so an immediate retry returns the same replacement refresh token instead of forcing a reconnect. Wrong-client refresh attempts are rejected without consuming the legitimate client's token, and successful refresh/replay calls slide the upstream token vault TTL forward with the local refresh window.
+- Restored upstream Entra refresh on the first use of each rotated local refresh token. Tenant ID, object ID, UPN, and `roles` claims are revalidated before the next local access token is accepted; a failed or identity-changing refresh revokes the local upstream session.
+- Added the 2026-07-28 authorization hardening used by the DCR compatibility flow: `application_type` registration metadata, loopback-only HTTP redirects, RFC 8707 `resource` binding across authorization/token/refresh requests, and the RFC 9207 `iss` authorization-response parameter.
+- Removed the compatibility host's temporary raw DCR request-body diagnostic logging; OAuth metadata is now logged only as bounded structural fields.
 - Added Bicep validation for the required Entra tenant/client parameters so `azd provision` fails fast instead of blanking `OAuth__EntraTenantId` or `OAuth__EntraClientId`.
+- Configured the Container App to use its system-assigned identity when pulling private images from ACR; `azd deploy server` no longer fails after a successful remote image build.
+- Added a bounded, idempotent post-provision retry for the Container App's Cosmos DB data-role assignment. This handles the short Entra replication window that can otherwise reject a newly created managed identity during its first deployment.
+- Preserved azd's last deployed Container App image during later infrastructure-only provisions instead of resetting a healthy revision to the public first-provision placeholder.
 
 ### Changed
 - Added reason-specific server-side diagnostics for OAuth refresh failures. `TokenHandler/refresh` now logs a stable rejection reason (`missing`, `expired`, `replay_window_expired`, `wrong_client`, `upstream_missing_or_expired`, etc.) plus short SHA-256 refresh-token fingerprints so stale per-session client credential generations can be correlated without logging token material.
 - Updated the compatibility notes for the modern unified ChatGPT/Codex Windows app, which is currently working well with DevBrain OAuth but remains under monitoring rather than being marked fully resolved.
 - Added optional OAuth token-window settings for deployments that need a different refresh cadence or replay tolerance: `OAUTH_ACCESS_TOKEN_LIFETIME_MINUTES` and `OAUTH_REFRESH_REPLAY_LIFETIME_MINUTES` flow through Bicep to `OAuth__AccessTokenLifetimeMinutes` and `OAuth__RefreshReplayLifetimeMinutes`. Values must be whole minutes from 1 through 1,440. If left unset, DevBrain uses its built-in defaults: 10 minutes for access tokens and 5 minutes for refresh replay markers.
-- Refreshed the deployed runtime dependency stack to current compatible NuGet releases, including `Microsoft.Azure.Functions.Worker` 2.52.0, `Microsoft.Azure.Functions.Worker.Extensions.Mcp` 1.6.0, `Microsoft.ApplicationInsights.WorkerService` 2.23.0, `Microsoft.Azure.Cosmos` 3.60.0, `Microsoft.Extensions.Azure` 1.14.0, IdentityModel 8.18.0, `Microsoft.AspNetCore.DataProtection` 10.0.8, and `System.Security.Cryptography.Xml` 10.0.10. Removed the unused direct `ModelContextProtocol` package reference.
-- Kept Application Insights on the direct Azure Functions isolated worker integration path (`AddApplicationInsightsTelemetryWorkerService` + `ConfigureFunctionsApplicationInsights`) instead of moving to the newer OpenTelemetry telemetry wiring.
-- Refreshed test tooling to `Microsoft.NET.Test.Sdk` 18.6.0, `xunit.runner.visualstudio` 3.1.5, and `Microsoft.Extensions.TimeProvider.Testing` 10.6.0.
+- Refreshed the deployed runtime dependency stack to current compatible NuGet releases, including `Microsoft.Azure.Functions.Worker` 2.52.0, `Microsoft.Azure.Functions.Worker.Sdk` 2.1.0, `Microsoft.Azure.Functions.Worker.Extensions.Mcp` 1.6.0, `Microsoft.Azure.Functions.Worker.ApplicationInsights` 2.51.0, `Microsoft.ApplicationInsights.WorkerService` 2.23.0, `Microsoft.Azure.Cosmos` 3.62.1, `Microsoft.Extensions.Azure` 1.14.0, IdentityModel 8.22.0, `Microsoft.AspNetCore.DataProtection` 10.0.10, and `System.Security.Cryptography.Xml` 10.0.10. Removed the unused direct `ModelContextProtocol` package reference.
+- Kept the compatibility Functions host on its direct isolated-worker Application Insights integration path (`AddApplicationInsightsTelemetryWorkerService` + `ConfigureFunctionsApplicationInsights`); the v2 ASP.NET Core host uses Azure Monitor OpenTelemetry.
+- Refreshed test tooling to `Microsoft.NET.Test.Sdk` 18.8.1, `xunit.runner.visualstudio` 3.1.5, and `Microsoft.Extensions.TimeProvider.Testing` 10.8.0.
 - Synced the release notes with merged Dependabot PR #19, which already moved `Microsoft.AspNetCore.DataProtection` and `System.Security.Cryptography.Xml` to 10.0.7.
-- Patched the remaining Azure Data Protection helper packages to `Azure.Extensions.AspNetCore.DataProtection.Blobs` 1.5.2 and `Azure.Extensions.AspNetCore.DataProtection.Keys` 1.6.2, then replaced the stale 10.0.6 workaround comment in the project file.
+- Patched the remaining Azure Data Protection helper packages to `Azure.Extensions.AspNetCore.DataProtection.Blobs` 1.5.3 and `Azure.Extensions.AspNetCore.DataProtection.Keys` 1.6.3, then replaced the stale 10.0.6 workaround comment in the project file.
 - Added `.serena/` to `.gitignore` so local Serena workspace metadata stays out of the public repository.
 
 ### Validation
 - `dotnet list devbrain.slnx package --vulnerable --include-transitive` reports no vulnerable packages.
 - `dotnet list devbrain.slnx package --outdated --highest-patch` reports no patch-level updates for direct package references.
 - `dotnet list devbrain.slnx package --outdated --include-transitive` was checked; direct package references are current except the intentional `Microsoft.ApplicationInsights.WorkerService` 2.x hold for the existing Functions Application Insights integration path, with upstream-owned transitive package updates still reported.
-- `dotnet list devbrain.slnx package --deprecated` reports no deprecated packages in `DevBrain.Functions`; the remaining deprecation is the test-only `xunit` 2.9.3 package, which requires a separate xUnit v3 migration.
-- `dotnet test devbrain.slnx` passes with 148 tests.
+- `dotnet list devbrain.slnx package --deprecated --include-transitive` reports no deprecated packages in `DevBrain.Core` or `DevBrain.Server`. The retained Functions extension chain still brings legacy caching abstractions, and the test projects retain xUnit 2.9.3 pending a separate xUnit v3 migration.
+- `dotnet test devbrain.slnx` passes with the Functions/core and ASP.NET Core server test suites.
+- A side-by-side Azure deployment was validated through the unified ChatGPT/Codex Windows app: all 12 tools were discovered, OAuth completed with `DevBrain.User`, and read-only calls returned existing documents from the shared Cosmos DB container.
 
 ## [1.9.0] — 2026-04-15
 

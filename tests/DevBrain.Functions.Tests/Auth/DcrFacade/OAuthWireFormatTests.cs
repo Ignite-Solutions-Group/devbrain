@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using DevBrain.Core.Auth.DcrFacade;
 using DevBrain.Functions.Auth.DcrFacade;
 
 namespace DevBrain.Functions.Tests.Auth.DcrFacade;
@@ -90,6 +91,7 @@ public sealed class OAuthWireFormatTests
             ClientIdIssuedAt: 1_700_000_000L,
             ClientName: "Claude Desktop",
             RedirectUris: ["https://claude.ai/api/mcp/auth_callback"],
+            ApplicationType: "web",
             TokenEndpointAuthMethod: "none");
 
         var json = JsonSerializer.Serialize(dto, options);
@@ -99,6 +101,7 @@ public sealed class OAuthWireFormatTests
         Assert.True(node.ContainsKey("client_id_issued_at"), $"missing client_id_issued_at in {json}");
         Assert.True(node.ContainsKey("client_name"), $"missing client_name in {json}");
         Assert.True(node.ContainsKey("redirect_uris"), $"missing redirect_uris in {json}");
+        Assert.True(node.ContainsKey("application_type"), $"missing application_type in {json}");
         Assert.True(node.ContainsKey("token_endpoint_auth_method"), $"missing token_endpoint_auth_method in {json}");
 
         // camelCase leak guards
@@ -112,6 +115,7 @@ public sealed class OAuthWireFormatTests
         Assert.Equal("abc123def456", (string)node["client_id"]!);
         Assert.Equal(1_700_000_000L, (long)node["client_id_issued_at"]!);
         Assert.Equal("Claude Desktop", (string)node["client_name"]!);
+        Assert.Equal("web", (string)node["application_type"]!);
         Assert.Equal("none", (string)node["token_endpoint_auth_method"]!);
         var uris = node["redirect_uris"]!.AsArray();
         Assert.Single(uris);
@@ -133,6 +137,7 @@ public sealed class OAuthWireFormatTests
             ClientIdIssuedAt: 0L,
             ClientName: null,
             RedirectUris: ["https://example.com/cb"],
+            ApplicationType: "web",
             TokenEndpointAuthMethod: "none");
 
         var json = JsonSerializer.Serialize(dto, options);
@@ -161,6 +166,7 @@ public sealed class OAuthWireFormatTests
             GrantTypesSupported: ["authorization_code", "refresh_token"],
             CodeChallengeMethodsSupported: ["S256"],
             TokenEndpointAuthMethodsSupported: ["none"],
+            AuthorizationResponseIssParameterSupported: true,
             ScopesSupported: ["documents.readwrite"]);
 
         var json = JsonSerializer.Serialize(dto, options);
@@ -175,6 +181,7 @@ public sealed class OAuthWireFormatTests
         Assert.True(node.ContainsKey("grant_types_supported"), $"missing grant_types_supported in {json}");
         Assert.True(node.ContainsKey("code_challenge_methods_supported"), $"missing code_challenge_methods_supported in {json}");
         Assert.True(node.ContainsKey("token_endpoint_auth_methods_supported"), $"missing token_endpoint_auth_methods_supported in {json}");
+        Assert.True(node.ContainsKey("authorization_response_iss_parameter_supported"), $"missing authorization_response_iss_parameter_supported in {json}");
         Assert.True(node.ContainsKey("scopes_supported"), $"missing scopes_supported in {json}");
 
         // camelCase leak guards (spot-check the ones with multi-word names)

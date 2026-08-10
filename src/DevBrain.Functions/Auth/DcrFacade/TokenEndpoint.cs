@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Web;
+using DevBrain.Core.Auth.DcrFacade;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -43,7 +44,8 @@ public sealed class TokenEndpoint
             Code: form["code"],
             CodeVerifier: form["code_verifier"],
             RedirectUri: form["redirect_uri"],
-            RefreshToken: form["refresh_token"]);
+            RefreshToken: form["refresh_token"],
+            Resource: form["resource"]);
 
         var result = await _handler.HandleAsync(request);
 

@@ -1,4 +1,4 @@
-using DevBrain.Functions.Auth.Crypto;
+using DevBrain.Core.Auth.Crypto;
 
 namespace DevBrain.Functions.Tests.Auth.Crypto;
 

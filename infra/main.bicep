@@ -6,9 +6,8 @@ param environmentName string
 
 // ─── v1.6 OAuth DCR facade parameters ───────────────────────────────────────
 //
-// These must be set by the deployer (via azd env set) BEFORE first deploy. See CHANGELOG v1.6.0
-// and the sprint doc "Deploy prerequisite" callout. Neither value is sensitive — the client secret
-// lives in Key Vault, not here.
+// Tenant and client IDs must be set by the deployer before first provision. Secret bootstrap values
+// use separate secure parameters below and are stored in Key Vault.
 
 @description('Entra tenant GUID (single-tenant only — not "common" or "organizations").')
 @minLength(1)
@@ -18,11 +17,30 @@ param entraTenantId string
 @minLength(1)
 param entraClientId string
 
+@secure()
+@description('Optional Entra client secret value to seed into Key Vault on first provision. Leave empty when the secret already exists.')
+param entraClientSecretValue string = ''
+
+@secure()
+@description('Optional base64-encoded 32-byte JWT signing secret to seed into Key Vault on first provision. Leave empty when the secret already exists.')
+param jwtSigningSecretValue string = ''
+
 @description('Optional local DevBrain access-token lifetime in whole minutes. Leave empty for the application default.')
 param oauthAccessTokenLifetimeMinutes string = ''
 
 @description('Optional rotated-refresh-token replay marker lifetime in whole minutes. Leave empty for the application default.')
 param oauthRefreshReplayLifetimeMinutes string = ''
+
+@description('Container image used when provisioning the v2 Container App. azd replaces it with the built DevBrain image during deployment.')
+param containerAppImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+
+@description('Minimum v2 Container App replica count. Set to 1 or higher when interactive cold-start latency is important.')
+@minValue(0)
+param containerAppMinReplicas int = 0
+
+@description('Maximum v2 Container App replica count.')
+@minValue(1)
+param containerAppMaxReplicas int = 3
 
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 
@@ -68,6 +86,14 @@ resource dataProtectionKeysContainer 'Microsoft.Storage/storageAccounts/blobServ
   }
 }
 
+resource dataProtectionV2KeysContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: blobService
+  name: 'dataprotection-keys-v2'
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
 // ─── Cosmos DB ───────────────────────────────────────────────────────────────
 
 resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
@@ -77,6 +103,12 @@ resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
   properties: {
     databaseAccountOfferType: 'Standard'
     enableFreeTier: false
+    enableAutomaticFailover: true
+    minimalTlsVersion: 'Tls12'
+    defaultIdentity: 'FirstPartyIdentity'
+    analyticalStorageConfiguration: {
+      schemaType: 'WellDefined'
+    }
     consistencyPolicy: {
       defaultConsistencyLevel: 'Session'
     }
@@ -164,16 +196,61 @@ resource applicationInsights 'Microsoft.Insights/components@2020-02-02' = {
   }
 }
 
+// ─── DevBrain v2 Container Apps hosting ─────────────────────────────────────
+
+resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
+  name: 'acrdevbrain${substring(resourceToken, 0, 6)}'
+  location: location
+  sku: {
+    name: 'Basic'
+  }
+  properties: {
+    adminUserEnabled: false
+    publicNetworkAccess: 'Enabled'
+    policies: {
+      quarantinePolicy: {
+        status: 'disabled'
+      }
+      retentionPolicy: {
+        days: 7
+        status: 'disabled'
+      }
+      trustPolicy: {
+        type: 'Notary'
+        status: 'disabled'
+      }
+    }
+  }
+}
+
+resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
+  name: 'cae-devbrain-${substring(resourceToken, 0, 6)}'
+  location: location
+  properties: {
+    appLogsConfiguration: {
+      destination: 'log-analytics'
+      logAnalyticsConfiguration: {
+        customerId: logAnalyticsWorkspace.properties.customerId
+        sharedKey: logAnalyticsWorkspace.listKeys().primarySharedKey
+      }
+    }
+  }
+}
+
+resource containerAppIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: 'id-devbrain-${substring(resourceToken, 0, 6)}'
+  location: location
+}
+
 // ─── Key Vault (v1.6 DCR facade) ────────────────────────────────────────────
 //
-// Holds two secrets set manually post-deploy (see CHANGELOG v1.6.0 and the sprint doc's
-// deploy prerequisite callout):
+// Holds two secrets managed outside the application runtime:
 //   - jwt-signing-secret: base64-encoded 32-byte HMAC key for DevBrain JWT signing.
 //     Generate with: `openssl rand -base64 32`
 //   - entra-client-secret: the client secret from the tenant-admin-created Entra app registration.
 //
-// Bicep does NOT create the secret resources themselves — their values come from outside and
-// populating them via Bicep parameters would put sensitive material in deployment state.
+// Existing deployments leave the secure seed parameters empty so Bicep does not replace either
+// secret. A new deployment may supply them once through secure azd environment values.
 
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   // Compressed form of the {type}devbrain{resourceToken} naming convention. The hyphenated form
@@ -237,6 +314,7 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
   kind: 'functionapp,linux'
   tags: {
     'azd-service-name': 'api'
+    'hidden-link: /app-insights-resource-id': applicationInsights.id
   }
   identity: {
     type: 'SystemAssigned'
@@ -284,8 +362,8 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
         // Disable the Application Insights SDK's default adaptive sampling while investigating —
         // sampling can drop the exact invocations we're trying to catch. Re-enable post-stabilization.
         { name: 'APPLICATIONINSIGHTS_SAMPLING_PERCENTAGE', value: '100' }
-        // v1.6 OAuth DCR facade. Secrets are Key Vault references — the secret values are set
-        // manually post-deploy (see CHANGELOG v1.6.0 and the sprint doc deploy prereqs).
+        // OAuth DCR facade. Secrets are Key Vault references. They can be seeded through the
+        // optional secure first-provision parameters or managed directly in Key Vault.
         { name: 'OAuth__BaseUrl', value: 'https://func-devbrain-${resourceToken}.azurewebsites.net' }
         { name: 'OAuth__EntraTenantId', value: entraTenantId }
         { name: 'OAuth__EntraClientId', value: entraClientId }
@@ -301,6 +379,165 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
       ]
     }
   }
+}
+
+resource entraClientSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(entraClientSecretValue)) {
+  parent: keyVault
+  name: 'entra-client-secret'
+  properties: {
+    value: entraClientSecretValue
+  }
+}
+
+resource jwtSigningSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(jwtSigningSecretValue)) {
+  parent: keyVault
+  name: 'jwt-signing-secret'
+  properties: {
+    value: jwtSigningSecretValue
+  }
+}
+
+var containerAppName = 'ca-devbrain-${substring(resourceToken, 0, 6)}'
+var containerAppHostName = '${containerAppName}.${containerAppsEnvironment.properties.defaultDomain}'
+var containerAppBaseUrl = 'https://${containerAppHostName}'
+
+resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
+  name: containerAppName
+  location: location
+  tags: {
+    'azd-service-name': 'server'
+  }
+  identity: {
+    type: 'SystemAssigned, UserAssigned'
+    userAssignedIdentities: {
+      '${containerAppIdentity.id}': {}
+    }
+  }
+  properties: {
+    managedEnvironmentId: containerAppsEnvironment.id
+    configuration: {
+      activeRevisionsMode: 'Single'
+      registries: [
+        {
+          server: containerRegistry.properties.loginServer
+          identity: 'system'
+        }
+      ]
+      ingress: {
+        external: true
+        allowInsecure: false
+        targetPort: 8080
+        transport: 'auto'
+      }
+      // The public placeholder image keeps initial provisioning independent of ACR. The
+      // explicit registry identity lets azd switch to the private built image during deploy.
+      secrets: [
+        {
+          name: 'entra-client-secret'
+          keyVaultUrl: '${keyVault.properties.vaultUri}secrets/entra-client-secret'
+          identity: containerAppIdentity.id
+        }
+        {
+          name: 'jwt-signing-secret'
+          keyVaultUrl: '${keyVault.properties.vaultUri}secrets/jwt-signing-secret'
+          identity: containerAppIdentity.id
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'server'
+          image: containerAppImage
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            { name: 'ASPNETCORE_HTTP_PORTS', value: '8080' }
+            { name: 'AZURE_CLIENT_ID', value: containerAppIdentity.properties.clientId }
+            { name: 'AllowedHosts', value: containerAppHostName }
+            { name: 'CosmosDb__AccountEndpoint', value: cosmosAccount.properties.documentEndpoint }
+            { name: 'CosmosDb__DatabaseName', value: 'devbrain' }
+            { name: 'CosmosDb__ContainerName', value: 'documents' }
+            { name: 'CosmosDb__OAuthContainerName', value: 'oauth_state' }
+            { name: 'CosmosDb__OAuthKeyPrefix', value: 'v2:' }
+            { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: applicationInsights.properties.ConnectionString }
+            { name: 'OAuth__BaseUrl', value: containerAppBaseUrl }
+            { name: 'OAuth__EntraTenantId', value: entraTenantId }
+            { name: 'OAuth__EntraClientId', value: entraClientId }
+            { name: 'OAuth__EntraClientSecret', secretRef: 'entra-client-secret' }
+            { name: 'OAuth__JwtSigningSecret', secretRef: 'jwt-signing-secret' }
+            { name: 'OAuth__AccessTokenLifetimeMinutes', value: oauthAccessTokenLifetimeMinutes }
+            { name: 'OAuth__RefreshReplayLifetimeMinutes', value: oauthRefreshReplayLifetimeMinutes }
+            { name: 'DataProtection__BlobUri', value: '${storageAccount.properties.primaryEndpoints.blob}dataprotection-keys-v2/keys.xml' }
+            { name: 'DataProtection__KeyVaultKeyUri', value: '${keyVault.properties.vaultUri}keys/data-protection-key' }
+            { name: 'RateLimit__PermitLimit', value: '120' }
+            { name: 'RateLimit__WindowSeconds', value: '60' }
+            { name: 'Server__MaxRequestBodySizeBytes', value: '4194304' }
+          ]
+          probes: [
+            {
+              type: 'Startup'
+              httpGet: {
+                path: '/healthz'
+                port: 8080
+                scheme: 'HTTP'
+                httpHeaders: [
+                  { name: 'Host', value: containerAppHostName }
+                ]
+              }
+              initialDelaySeconds: 1
+              periodSeconds: 5
+              timeoutSeconds: 3
+              failureThreshold: 30
+            }
+            {
+              type: 'Readiness'
+              httpGet: {
+                path: '/healthz'
+                port: 8080
+                scheme: 'HTTP'
+                httpHeaders: [
+                  { name: 'Host', value: containerAppHostName }
+                ]
+              }
+              periodSeconds: 5
+              timeoutSeconds: 3
+              failureThreshold: 3
+              successThreshold: 1
+            }
+            {
+              type: 'Liveness'
+              httpGet: {
+                path: '/healthz'
+                port: 8080
+                scheme: 'HTTP'
+                httpHeaders: [
+                  { name: 'Host', value: containerAppHostName }
+                ]
+              }
+              initialDelaySeconds: 15
+              periodSeconds: 10
+              timeoutSeconds: 3
+              failureThreshold: 3
+            }
+          ]
+        }
+      ]
+      scale: {
+        minReplicas: containerAppMinReplicas
+        maxReplicas: containerAppMaxReplicas
+      }
+    }
+  }
+  dependsOn: [
+    containerAppStorageBlobDataOwnerRole
+    containerAppKeyVaultCryptoUserRole
+    containerAppKeyVaultSecretsUserRole
+    entraClientSecret
+    jwtSigningSecret
+  ]
 }
 
 // ─── App Service Authentication: EXPLICITLY DISABLED (v1.6 DCR facade) ──────
@@ -391,6 +628,7 @@ resource monitoringMetricsPublisherRole 'Microsoft.Authorization/roleAssignments
 
 // Cosmos DB Built-in Data Contributor role
 var cosmosDataContributorRoleId = '00000000-0000-0000-0000-000000000002'
+var containerAppCosmosRoleAssignmentName = guid(cosmosAccount.id, containerAppIdentity.id, cosmosDataContributorRoleId)
 
 resource cosmosRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = {
   parent: cosmosAccount
@@ -431,9 +669,65 @@ resource keyVaultSecretsOfficerRole 'Microsoft.Authorization/roleAssignments@202
   }
 }
 
+// ─── DevBrain v2 Container App managed-identity access ──────────────────────
+
+resource containerAppAcrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(containerRegistry.id, containerApp.id, '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+  scope: containerRegistry
+  properties: {
+    principalId: containerApp.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+  }
+}
+
+resource containerAppStorageBlobDataOwnerRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storageAccount.id, containerAppIdentity.id, 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
+  scope: storageAccount
+  properties: {
+    principalId: containerAppIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
+  }
+}
+
+// Cosmos native SQL role assignments do not accept principalType. A newly-created managed
+// identity can therefore be rejected while it is still replicating through Entra. The azd
+// postprovision hook creates this deterministic assignment with a bounded, idempotent retry.
+
+resource containerAppKeyVaultCryptoUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(keyVault.id, containerAppIdentity.id, '12338af0-0e69-4776-bea7-57ae8d297424')
+  scope: keyVault
+  properties: {
+    principalId: containerAppIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '12338af0-0e69-4776-bea7-57ae8d297424')
+  }
+}
+
+resource containerAppKeyVaultSecretsUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(keyVault.id, containerAppIdentity.id, '4633458b-17de-408a-b874-0445c86b69e6')
+  scope: keyVault
+  properties: {
+    principalId: containerAppIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
+  }
+}
+
 // ─── Outputs ─────────────────────────────────────────────────────────────────
 
 output AZURE_FUNCTION_URL string = 'https://${functionApp.properties.defaultHostName}'
+output AZURE_CONTAINER_APP_URL string = containerAppBaseUrl
+output AZURE_CONTAINER_REGISTRY_NAME string = containerRegistry.name
+output AZURE_CONTAINER_REGISTRY_ENDPOINT string = containerRegistry.properties.loginServer
+output AZURE_CONTAINER_APP_IDENTITY_PRINCIPAL_ID string = containerAppIdentity.properties.principalId
+output AZURE_CONTAINER_APP_COSMOS_ROLE_ASSIGNMENT_ID string = containerAppCosmosRoleAssignmentName
+output AZURE_COSMOS_ACCOUNT_ID string = cosmosAccount.id
+output AZURE_COSMOS_ACCOUNT_NAME string = cosmosAccount.name
+output AZURE_KEY_VAULT_NAME string = keyVault.name
+output AZURE_LOG_ANALYTICS_WORKSPACE_ID string = logAnalyticsWorkspace.id
+output AZURE_RESOURCE_GROUP string = resourceGroup().name
 output COSMOS_ACCOUNT_ENDPOINT string = cosmosAccount.properties.documentEndpoint
 output KEY_VAULT_NAME string = keyVault.name
 output KEY_VAULT_URI string = keyVault.properties.vaultUri

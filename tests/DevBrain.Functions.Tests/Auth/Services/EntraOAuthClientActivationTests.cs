@@ -1,4 +1,4 @@
-using DevBrain.Functions.Auth.Services;
+using DevBrain.Core.Auth.Services;
 using DevBrain.Functions.Tests.TestHelpers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;

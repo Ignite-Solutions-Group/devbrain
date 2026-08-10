@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DevBrain.Core.Auth.DcrFacade;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -38,30 +39,11 @@ public sealed class RegisterEndpoint
     {
         _logger.LogInformation("POST /register received");
 
-        // TODO(v1.6 Claude Desktop DCR parsing investigation): temporary diagnostic logging.
-        // Clients are hitting "empty redirect_uris" rejection somewhere between the wire and
-        // RegistrationHandler.HandleAsync; we need the raw body + Content-Type to know whether
-        // the problem is a missing field, a wrong content type (e.g., form-urlencoded instead
-        // of JSON), a casing mismatch (`redirectUris` vs `redirect_uris`), or something else
-        // entirely. Warning level so App Insights doesn't sample it out. Remove before v1.7.
-        var contentType = req.Headers.TryGetValues("Content-Type", out var ctValues)
-            ? string.Join(",", ctValues)
-            : "(none)";
-
         string rawBody;
         using (var reader = new StreamReader(req.Body))
         {
             rawBody = await reader.ReadToEndAsync();
         }
-
-        const int MaxBodyLogLength = 2000;
-        var loggedBody = rawBody.Length <= MaxBodyLogLength
-            ? rawBody
-            : rawBody[..MaxBodyLogLength] + "... (truncated)";
-
-        _logger.LogWarning(
-            "RegistrationHandler: raw body content-type={ContentType} body={Body}",
-            contentType, loggedBody);
 
         RegistrationRequest? body;
         try
@@ -113,9 +95,10 @@ public sealed class RegisterEndpoint
         [property: JsonPropertyName("client_id_issued_at")] long ClientIdIssuedAt,
         [property: JsonPropertyName("client_name")] string? ClientName,
         [property: JsonPropertyName("redirect_uris")] string[] RedirectUris,
+        [property: JsonPropertyName("application_type")] string ApplicationType,
         [property: JsonPropertyName("token_endpoint_auth_method")] string TokenEndpointAuthMethod)
     {
         public RegistrationResponseDto(RegistrationResponse response)
-            : this(response.ClientId, response.ClientIdIssuedAt, response.ClientName, response.RedirectUris, response.TokenEndpointAuthMethod) { }
+            : this(response.ClientId, response.ClientIdIssuedAt, response.ClientName, response.RedirectUris, response.ApplicationType, response.TokenEndpointAuthMethod) { }
     }
 }

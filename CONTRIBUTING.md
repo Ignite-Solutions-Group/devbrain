@@ -6,9 +6,9 @@ Thanks for your interest in contributing to DevBrain!
 
 1. **Prerequisites**
    - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
-   - [Azure Functions Core Tools v4](https://learn.microsoft.com/azure/azure-functions/functions-run-local)
    - [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) (logged in via `az login`)
    - A Cosmos DB account (or the [Cosmos DB Emulator](https://learn.microsoft.com/azure/cosmos-db/local-emulator))
+   - [Azure Functions Core Tools v4](https://learn.microsoft.com/azure/azure-functions/functions-run-local) only when changing the compatibility host
 
 2. **Clone and build**
    ```bash
@@ -18,16 +18,15 @@ Thanks for your interest in contributing to DevBrain!
    ```
 
 3. **Configure local settings**
-   ```bash
-   cp src/DevBrain.Functions/local.settings.json.example src/DevBrain.Functions/local.settings.json
-   ```
-   Edit `local.settings.json` with your Cosmos DB account endpoint.
+
+   Configure the required `CosmosDb__*`, `OAuth__*`, and `DataProtection__*` values through environment variables or .NET user secrets. The server intentionally fails fast when required values are absent.
 
 4. **Run locally**
    ```bash
-   cd src/DevBrain.Functions
-   func start
+   dotnet run --project src/DevBrain.Server
    ```
+
+   The v2 MCP endpoint is `/mcp` and the anonymous health endpoint is `/healthz`. For Functions compatibility-host work, configure `src/DevBrain.Functions/local.settings.json` and run `func start` from that directory.
 
 ## Pull Request Process
 
