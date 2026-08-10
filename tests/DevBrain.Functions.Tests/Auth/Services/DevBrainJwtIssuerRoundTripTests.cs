@@ -1,5 +1,5 @@
 using System.Text.Json;
-using DevBrain.Functions.Auth.Services;
+using DevBrain.Core.Auth.Services;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.IdentityModel.JsonWebTokens;
 

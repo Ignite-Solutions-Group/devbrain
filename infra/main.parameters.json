@@ -14,11 +14,20 @@
     "entraClientId": {
       "value": "${ENTRA_CLIENT_ID}"
     },
+    "entraClientSecretValue": {
+      "value": "${ENTRA_CLIENT_SECRET=}"
+    },
+    "jwtSigningSecretValue": {
+      "value": "${JWT_SIGNING_SECRET=}"
+    },
     "oauthAccessTokenLifetimeMinutes": {
       "value": "${OAUTH_ACCESS_TOKEN_LIFETIME_MINUTES=}"
     },
     "oauthRefreshReplayLifetimeMinutes": {
       "value": "${OAUTH_REFRESH_REPLAY_LIFETIME_MINUTES=}"
+    },
+    "containerAppImage": {
+      "value": "${SERVICE_SERVER_IMAGE_NAME=mcr.microsoft.com/azuredocs/containerapps-helloworld:latest}"
     }
   }
 }

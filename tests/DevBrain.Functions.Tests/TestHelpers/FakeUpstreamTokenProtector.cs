@@ -1,6 +1,6 @@
 using System.Text.Json;
-using DevBrain.Functions.Auth.Models;
-using DevBrain.Functions.Auth.Services;
+using DevBrain.Core.Auth.Models;
+using DevBrain.Core.Auth.Services;
 
 namespace DevBrain.Functions.Tests.TestHelpers;
 

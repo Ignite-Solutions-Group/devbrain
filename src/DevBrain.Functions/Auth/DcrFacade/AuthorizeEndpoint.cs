@@ -1,8 +1,10 @@
 using System.Net;
 using System.Text.Json;
 using System.Web;
+using DevBrain.Core.Auth.DcrFacade;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace DevBrain.Functions.Auth.DcrFacade;
@@ -15,11 +17,18 @@ public sealed class AuthorizeEndpoint
 {
     private readonly AuthorizationHandler _handler;
     private readonly ILogger<AuthorizeEndpoint> _logger;
+    private readonly string _issuer;
+    private readonly string _canonicalResource;
 
-    public AuthorizeEndpoint(AuthorizationHandler handler, ILogger<AuthorizeEndpoint> logger)
+    public AuthorizeEndpoint(
+        AuthorizationHandler handler,
+        ILogger<AuthorizeEndpoint> logger,
+        IConfiguration configuration)
     {
         _handler = handler;
         _logger = logger;
+        _issuer = configuration["OAuth:BaseUrl"]!.TrimEnd('/');
+        _canonicalResource = $"{_issuer}/runtime/webhooks/mcp";
     }
 
     [Function("AuthorizeEndpoint")]
@@ -35,7 +44,10 @@ public sealed class AuthorizeEndpoint
             RedirectUri: query["redirect_uri"] ?? string.Empty,
             State: query["state"],
             CodeChallenge: query["code_challenge"] ?? string.Empty,
-            CodeChallengeMethod: query["code_challenge_method"] ?? "plain");
+            CodeChallengeMethod: query["code_challenge_method"] ?? "plain",
+            Resource: query["resource"],
+            Issuer: _issuer,
+            CanonicalResource: _canonicalResource);
 
         var result = await _handler.HandleAsync(request);
 

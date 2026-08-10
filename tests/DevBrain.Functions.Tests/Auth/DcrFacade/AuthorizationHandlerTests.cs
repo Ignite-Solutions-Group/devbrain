@@ -1,6 +1,6 @@
-using DevBrain.Functions.Auth.DcrFacade;
-using DevBrain.Functions.Auth.Models;
-using DevBrain.Functions.Auth.Services;
+using DevBrain.Core.Auth.DcrFacade;
+using DevBrain.Core.Auth.Models;
+using DevBrain.Core.Auth.Services;
 using DevBrain.Functions.Tests.Auth.Services;
 using DevBrain.Functions.Tests.TestHelpers;
 using Microsoft.Extensions.Time.Testing;
@@ -13,6 +13,8 @@ public sealed class AuthorizationHandlerTests
     private const string ClientId = "test-client-id";
     private const string ValidRedirect = "https://localhost:8000/callback";
     private const string ClientChallenge = "VGhpcy1pcy1hLWZha2UtY29kZS1jaGFsbGVuZ2UtZm9yLXRlc3Rpbmc"; // 43+ chars
+    private const string Issuer = "https://devbrain.example.com";
+    private const string Resource = "https://devbrain.example.com/mcp";
 
     private static async Task<(AuthorizationHandler handler, FakeOAuthStateStore store, StubUpstream upstream)> CreateWithRegisteredClientAsync()
     {
@@ -37,7 +39,10 @@ public sealed class AuthorizationHandlerTests
         RedirectUri: ValidRedirect,
         State: "client-state-xyz",
         CodeChallenge: ClientChallenge,
-        CodeChallengeMethod: "S256");
+        CodeChallengeMethod: "S256",
+        Resource: Resource,
+        Issuer: Issuer,
+        CanonicalResource: Resource);
 
     [Fact]
     public async Task ValidRequest_PersistsTransaction_AndReturnsUpstreamRedirect()
@@ -60,6 +65,8 @@ public sealed class AuthorizationHandlerTests
         Assert.Equal(ClientChallenge, txn.ClientCodeChallenge);           // client's challenge stored
         Assert.NotEqual(ClientChallenge, txn.UpstreamPkceVerifier);       // upstream verifier is independent
         Assert.Equal("client-state-xyz", txn.ClientState);
+        Assert.Equal(Resource, txn.Resource);
+        Assert.Equal(Issuer, txn.Issuer);
     }
 
     [Theory]
@@ -143,6 +150,20 @@ public sealed class AuthorizationHandlerTests
 
         var prefix = await handler.HandleAsync(ValidRequest() with { RedirectUri = "https://localhost:8000" });
         Assert.False(prefix.IsSuccess);
+    }
+
+    [Fact]
+    public async Task ResourceForDifferentServer_IsRejected()
+    {
+        var (handler, _, _) = await CreateWithRegisteredClientAsync();
+
+        var result = await handler.HandleAsync(ValidRequest() with
+        {
+            Resource = "https://other.example.com/mcp",
+        });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("invalid_target", result.ErrorCode);
     }
 
     // ----- test double for IUpstreamOAuthClient that records what was passed to BuildAuthorizeUri -----

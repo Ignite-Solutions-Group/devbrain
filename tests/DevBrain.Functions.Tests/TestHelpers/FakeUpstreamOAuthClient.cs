@@ -1,4 +1,4 @@
-using DevBrain.Functions.Auth.Services;
+using DevBrain.Core.Auth.Services;
 
 namespace DevBrain.Functions.Tests.TestHelpers;
 
@@ -47,5 +47,6 @@ public sealed class FakeUpstreamOAuthClient : IUpstreamOAuthClient
             ExpiresIn: TimeSpan.FromHours(1),
             UserPrincipalName: "derek@ignitesolutions.group",
             ObjectId: "00000000-0000-0000-0000-000000000001",
-            TenantId: "tenant-guid");
+            TenantId: "tenant-guid",
+            Roles: ["DevBrain.User"]);
 }

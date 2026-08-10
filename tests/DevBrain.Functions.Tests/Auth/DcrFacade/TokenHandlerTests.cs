@@ -1,8 +1,9 @@
-using DevBrain.Functions.Auth.Crypto;
-using DevBrain.Functions.Auth.DcrFacade;
-using DevBrain.Functions.Auth.Models;
-using DevBrain.Functions.Auth.Services;
+using DevBrain.Core.Auth.Crypto;
+using DevBrain.Core.Auth.DcrFacade;
+using DevBrain.Core.Auth.Models;
+using DevBrain.Core.Auth.Services;
 using DevBrain.Functions.Tests.Auth.Services;
+using DevBrain.Functions.Tests.TestHelpers;
 using Microsoft.Extensions.Time.Testing;
 
 namespace DevBrain.Functions.Tests.Auth.DcrFacade;
@@ -24,12 +25,14 @@ public sealed class TokenHandlerTests
         TokenHandler Handler,
         FakeOAuthStateStore Store,
         DevBrainJwtIssuer JwtIssuer,
+        FakeUpstreamOAuthClient Upstream,
         FakeTimeProvider Clock);
 
     private static Harness Create(TokenHandlerOptions? options = null)
     {
         var clock = new FakeTimeProvider(Epoch);
         var store = new FakeOAuthStateStore(clock);
+        var upstream = new FakeUpstreamOAuthClient();
         var jwtIssuer = new DevBrainJwtIssuer(
             new DevBrainJwtIssuerOptions
             {
@@ -39,10 +42,14 @@ public sealed class TokenHandlerTests
                 TenantId = TestTenantId,
             },
             clock);
-        var handler = options is null
-            ? new TokenHandler(store, jwtIssuer, clock)
-            : new TokenHandler(store, jwtIssuer, clock, options, logger: null);
-        return new Harness(handler, store, jwtIssuer, clock);
+        var handler = new TokenHandler(
+            store,
+            jwtIssuer,
+            upstream,
+            clock,
+            options ?? TokenHandlerOptions.Default,
+            logger: null);
+        return new Harness(handler, store, jwtIssuer, upstream, clock);
     }
 
     /// <summary>Seeds an auth code + upstream vault entry, mirroring what /callback would have done.</summary>
@@ -57,6 +64,7 @@ public sealed class TokenHandlerTests
             Code = code,
             ClientId = ClientId,
             ClientRedirectUri = ClientRedirect,
+            Resource = Audience,
             ClientCodeChallenge = challenge,
             ClientCodeChallengeMethod = "S256",
             UpstreamJti = jti,
@@ -253,6 +261,7 @@ public sealed class TokenHandlerTests
         Assert.True(refreshed.IsSuccess);
         Assert.NotEqual(firstRefresh, refreshed.Response!.RefreshToken);
         Assert.NotEmpty(refreshed.Response.AccessToken);
+        Assert.Equal(1, h.Upstream.RefreshCalls);
 
         // Immediate retry/restart with the old token returns the same replacement refresh token.
         var replayed = await h.Handler.HandleAsync(new TokenRequest(
@@ -260,6 +269,7 @@ public sealed class TokenHandlerTests
         Assert.True(replayed.IsSuccess);
         Assert.Equal(refreshed.Response.RefreshToken, replayed.Response!.RefreshToken);
         Assert.NotEmpty(replayed.Response.AccessToken);
+        Assert.Equal(1, h.Upstream.RefreshCalls);
 
         h.Clock.Advance(TimeSpan.FromMinutes(6));
 
@@ -357,6 +367,38 @@ public sealed class TokenHandlerTests
     }
 
     [Fact]
+    public async Task RefreshToken_WrongResource_RejectedWithoutBurningToken()
+    {
+        var h = Create();
+        var (code, verifier, _) = await SeedAuthCodeAsync(h);
+
+        var initial = await h.Handler.HandleAsync(new TokenRequest(
+            "authorization_code", ClientId, code, verifier, ClientRedirect, null));
+
+        var wrongResource = await h.Handler.HandleAsync(new TokenRequest(
+            "refresh_token",
+            ClientId,
+            null,
+            null,
+            null,
+            initial.Response!.RefreshToken,
+            Resource: "https://other.example.com/mcp"));
+
+        Assert.False(wrongResource.IsSuccess);
+        Assert.Equal("invalid_grant", wrongResource.ErrorCode);
+
+        var legitimate = await h.Handler.HandleAsync(new TokenRequest(
+            "refresh_token",
+            ClientId,
+            null,
+            null,
+            null,
+            initial.Response.RefreshToken,
+            Resource: Audience));
+        Assert.True(legitimate.IsSuccess);
+    }
+
+    [Fact]
     public async Task RefreshToken_ExtendsUpstreamVaultExpiry()
     {
         var h = Create();
@@ -377,6 +419,64 @@ public sealed class TokenHandlerTests
         var after = await h.Store.GetUpstreamTokenAsync(upstreamJti);
         Assert.NotNull(after);
         Assert.Equal(Epoch.AddDays(30), after!.ExpiresAt);
+    }
+
+    [Fact]
+    public async Task RefreshToken_RevalidatesEntraRolesAndIdentity()
+    {
+        var h = Create();
+        var (code, verifier, upstreamJti) = await SeedAuthCodeAsync(h);
+        h.Upstream.RefreshResponder = _ => new UpstreamTokenResponse(
+            AccessToken: "new-at",
+            RefreshToken: "new-rt",
+            IdToken: "new.id.token",
+            ExpiresIn: TimeSpan.FromHours(1),
+            UserPrincipalName: "renamed@ignitesolutions.group",
+            ObjectId: "00000000-0000-0000-0000-000000000001",
+            TenantId: "tenant-guid",
+            Roles: []);
+
+        var initial = await h.Handler.HandleAsync(new TokenRequest(
+            "authorization_code", ClientId, code, verifier, ClientRedirect, null));
+        var refreshed = await h.Handler.HandleAsync(new TokenRequest(
+            "refresh_token", ClientId, null, null, null, initial.Response!.RefreshToken));
+
+        Assert.True(refreshed.IsSuccess);
+        var upstreamRecord = await h.Store.GetUpstreamTokenAsync(upstreamJti);
+        Assert.NotNull(upstreamRecord);
+        Assert.Equal("renamed@ignitesolutions.group", upstreamRecord.UserPrincipalName);
+        Assert.Empty(upstreamRecord.Roles);
+        Assert.Equal("new-at", upstreamRecord.Envelope.AccessToken);
+        Assert.Equal("new-rt", upstreamRecord.Envelope.RefreshToken);
+    }
+
+    [Fact]
+    public async Task RefreshToken_ChangedEntraIdentityRevokesLocalSession()
+    {
+        var h = Create();
+        var (code, verifier, upstreamJti) = await SeedAuthCodeAsync(h);
+        h.Upstream.RefreshResponder = _ => new UpstreamTokenResponse(
+            AccessToken: "new-at",
+            RefreshToken: "new-rt",
+            IdToken: "new.id.token",
+            ExpiresIn: TimeSpan.FromHours(1),
+            UserPrincipalName: "attacker@example.com",
+            ObjectId: "00000000-0000-0000-0000-000000000099",
+            TenantId: "tenant-guid",
+            Roles: ["DevBrain.User"]);
+
+        var initial = await h.Handler.HandleAsync(new TokenRequest(
+            "authorization_code", ClientId, code, verifier, ClientRedirect, null));
+        var refreshed = await h.Handler.HandleAsync(new TokenRequest(
+            "refresh_token", ClientId, null, null, null, initial.Response!.RefreshToken));
+
+        Assert.False(refreshed.IsSuccess);
+        Assert.Equal("invalid_grant", refreshed.ErrorCode);
+        Assert.Null(await h.Store.GetUpstreamTokenAsync(upstreamJti));
+
+        var retry = await h.Handler.HandleAsync(new TokenRequest(
+            "refresh_token", ClientId, null, null, null, initial.Response.RefreshToken));
+        Assert.False(retry.IsSuccess);
     }
 
     [Fact]

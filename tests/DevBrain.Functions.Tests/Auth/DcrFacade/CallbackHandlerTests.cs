@@ -1,7 +1,7 @@
 using System.Web;
-using DevBrain.Functions.Auth.DcrFacade;
-using DevBrain.Functions.Auth.Models;
-using DevBrain.Functions.Auth.Services;
+using DevBrain.Core.Auth.DcrFacade;
+using DevBrain.Core.Auth.Models;
+using DevBrain.Core.Auth.Services;
 using DevBrain.Functions.Tests.Auth.Services;
 using DevBrain.Functions.Tests.TestHelpers;
 using Microsoft.Extensions.Time.Testing;
@@ -21,6 +21,8 @@ public sealed class CallbackHandlerTests
     private const string UpstreamState = "upstream-state-abc";
     private const string ClientChallenge = "client-code-challenge-value-matching-pkce-format";
     private const string UpstreamVerifier = "upstream-verifier-from-authorize";
+    private const string Issuer = "https://devbrain.example.com";
+    private const string Resource = "https://devbrain.example.com/mcp";
 
     private sealed record Harness(
         CallbackHandler Handler,
@@ -45,6 +47,8 @@ public sealed class CallbackHandlerTests
             ClientId = ClientId,
             ClientRedirectUri = ClientRedirect,
             ClientState = ClientState,
+            Issuer = Issuer,
+            Resource = Resource,
             ClientCodeChallenge = ClientChallenge,
             ClientCodeChallengeMethod = "S256",
             UpstreamPkceVerifier = UpstreamVerifier,
@@ -70,6 +74,7 @@ public sealed class CallbackHandlerTests
         var query = HttpUtility.ParseQueryString(result.RedirectTo.Query);
         Assert.NotNull(query["code"]);
         Assert.Equal(ClientState, query["state"]);
+        Assert.Equal(Issuer, query["iss"]);
 
         // The DevBrain auth code exists and ties through to the upstream vault.
         var devbrainCode = query["code"]!;
@@ -77,10 +82,12 @@ public sealed class CallbackHandlerTests
         Assert.NotNull(redeemed);
         Assert.Equal(ClientId, redeemed.ClientId);
         Assert.Equal(ClientChallenge, redeemed.ClientCodeChallenge);
+        Assert.Equal(Resource, redeemed.Resource);
 
         var upstreamRecord = await h.Store.GetUpstreamTokenAsync(redeemed.UpstreamJti);
         Assert.NotNull(upstreamRecord);
         Assert.Equal("derek@ignitesolutions.group", upstreamRecord.UserPrincipalName);
+        Assert.Contains("DevBrain.User", upstreamRecord.Roles);
 
         // Upstream was called exactly once with DevBrain's PKCE verifier, not the client's challenge.
         Assert.Equal(1, h.Upstream.ExchangeCodeCalls);
