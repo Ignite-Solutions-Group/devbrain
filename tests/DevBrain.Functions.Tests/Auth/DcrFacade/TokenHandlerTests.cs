@@ -28,7 +28,9 @@ public sealed class TokenHandlerTests
         FakeUpstreamOAuthClient Upstream,
         FakeTimeProvider Clock);
 
-    private static Harness Create(TokenHandlerOptions? options = null)
+    private static Harness Create(
+        TokenHandlerOptions? options = null,
+        RecordingLogger<TokenHandler>? logger = null)
     {
         var clock = new FakeTimeProvider(Epoch);
         var store = new FakeOAuthStateStore(clock);
@@ -48,7 +50,7 @@ public sealed class TokenHandlerTests
             upstream,
             clock,
             options ?? TokenHandlerOptions.Default,
-            logger: null);
+            logger);
         return new Harness(handler, store, jwtIssuer, upstream, clock);
     }
 
@@ -84,6 +86,33 @@ public sealed class TokenHandlerTests
         });
 
         return (code, verifier, jti);
+    }
+
+    [Fact]
+    public async Task Diagnostics_DoNotRenderRawTokenRequestValues()
+    {
+        var logger = new RecordingLogger<TokenHandler>();
+        var h = Create(logger: logger);
+        const string maliciousGrantType = "client_credentials\r\nFORGED-TOKEN-LOG";
+
+        var result = await h.Handler.HandleAsync(new TokenRequest(
+            maliciousGrantType,
+            "client-id\r\nFORGED-CLIENT-LOG",
+            null,
+            null,
+            null,
+            null));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("unsupported_grant_type", result.ErrorCode);
+        Assert.Contains(maliciousGrantType, result.ErrorDescription, StringComparison.Ordinal);
+        Assert.NotEmpty(logger.Messages);
+        Assert.All(logger.Messages, message =>
+        {
+            Assert.DoesNotContain("FORGED", message, StringComparison.Ordinal);
+            Assert.DoesNotContain('\r', message);
+            Assert.DoesNotContain('\n', message);
+        });
     }
 
     [Fact]

@@ -16,12 +16,13 @@ public sealed class AuthorizationHandlerTests
     private const string Issuer = "https://devbrain.example.com";
     private const string Resource = "https://devbrain.example.com/mcp";
 
-    private static async Task<(AuthorizationHandler handler, FakeOAuthStateStore store, StubUpstream upstream)> CreateWithRegisteredClientAsync()
+    private static async Task<(AuthorizationHandler handler, FakeOAuthStateStore store, StubUpstream upstream)> CreateWithRegisteredClientAsync(
+        RecordingLogger<AuthorizationHandler>? logger = null)
     {
         var clock = new FakeTimeProvider(Epoch);
         var store = new FakeOAuthStateStore(clock);
         var upstream = new StubUpstream();
-        var handler = new AuthorizationHandler(store, upstream, clock);
+        var handler = new AuthorizationHandler(store, upstream, clock, logger);
 
         await store.SaveClientAsync(new RegisteredClient
         {
@@ -91,6 +92,26 @@ public sealed class AuthorizationHandlerTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("unsupported_response_type", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task Diagnostics_DoNotRenderRawAuthorizationValues()
+    {
+        var logger = new RecordingLogger<AuthorizationHandler>();
+        var (handler, _, _) = await CreateWithRegisteredClientAsync(logger);
+        const string maliciousResponseType = "token\r\nFORGED-AUTHORIZATION-LOG";
+
+        var result = await handler.HandleAsync(ValidRequest() with { ResponseType = maliciousResponseType });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("unsupported_response_type", result.ErrorCode);
+        Assert.NotEmpty(logger.Messages);
+        Assert.All(logger.Messages, message =>
+        {
+            Assert.DoesNotContain(maliciousResponseType, message, StringComparison.Ordinal);
+            Assert.DoesNotContain('\r', message);
+            Assert.DoesNotContain('\n', message);
+        });
     }
 
     [Fact]

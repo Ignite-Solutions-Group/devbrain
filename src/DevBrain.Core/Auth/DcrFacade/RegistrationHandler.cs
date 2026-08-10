@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using DevBrain.Core.Auth.Logging;
 using DevBrain.Core.Auth.Models;
 using DevBrain.Core.Auth.Services;
 using Microsoft.Extensions.Logging;
@@ -35,8 +36,9 @@ public sealed class RegistrationHandler
     public async Task<RegistrationResult> HandleAsync(RegistrationRequest request)
     {
         _logger?.LogInformation(
-            "RegistrationHandler: request received clientName={ClientName} redirectUriCount={RedirectUriCount}",
-            request.ClientName, request.RedirectUris?.Length ?? 0);
+            "RegistrationHandler: request received clientNameFingerprint={ClientNameFingerprint} redirectUriCount={RedirectUriCount}",
+            OAuthLogValue.Fingerprint(request.ClientName),
+            request.RedirectUris?.Length ?? 0);
 
         // RFC 7591 §2: redirect_uris is REQUIRED and MUST contain at least one value.
         if (request.RedirectUris is null || request.RedirectUris.Length == 0)
@@ -48,7 +50,7 @@ public sealed class RegistrationHandler
         var applicationType = string.IsNullOrEmpty(request.ApplicationType) ? "web" : request.ApplicationType;
         if (applicationType is not ("native" or "web"))
         {
-            _logger?.LogWarning("RegistrationHandler: rejected — unsupported application_type={ApplicationType}", applicationType);
+            _logger?.LogWarning("RegistrationHandler: rejected — unsupported application_type");
             return RegistrationResult.Error("invalid_client_metadata", "application_type must be 'native' or 'web'.");
         }
 
@@ -56,19 +58,25 @@ public sealed class RegistrationHandler
         {
             if (string.IsNullOrWhiteSpace(uri) || !Uri.TryCreate(uri, UriKind.Absolute, out var parsed))
             {
-                _logger?.LogWarning("RegistrationHandler: rejected — redirect_uri {Uri} is not a valid absolute URI", uri);
+                _logger?.LogWarning(
+                    "RegistrationHandler: rejected — redirectUriFingerprint={RedirectUriFingerprint} is not a valid absolute URI",
+                    OAuthLogValue.Fingerprint(uri));
                 return RegistrationResult.Error("invalid_redirect_uri", $"redirect_uri '{uri}' is not a valid absolute URI.");
             }
 
             // Only http/https are acceptable. We don't accept custom URI schemes, mailto:, etc.
             if (parsed.Scheme is not ("http" or "https"))
             {
-                _logger?.LogWarning("RegistrationHandler: rejected — redirect_uri scheme {Scheme} not allowed", parsed.Scheme);
+                _logger?.LogWarning(
+                    "RegistrationHandler: rejected — redirect URI scheme fingerprint={SchemeFingerprint} not allowed",
+                    OAuthLogValue.Fingerprint(parsed.Scheme));
                 return RegistrationResult.Error("invalid_redirect_uri", $"redirect_uri scheme '{parsed.Scheme}' is not allowed. Use http or https.");
             }
             if (parsed.Scheme == "http" && !parsed.IsLoopback)
             {
-                _logger?.LogWarning("RegistrationHandler: rejected — non-loopback HTTP redirect_uri {Uri}", uri);
+                _logger?.LogWarning(
+                    "RegistrationHandler: rejected — non-loopback HTTP redirectUriFingerprint={RedirectUriFingerprint}",
+                    OAuthLogValue.Fingerprint(uri));
                 return RegistrationResult.Error("invalid_redirect_uri", "HTTP redirect_uris are allowed only for loopback clients.");
             }
         }
@@ -92,8 +100,9 @@ public sealed class RegistrationHandler
         await _store.SaveClientAsync(record);
 
         _logger?.LogInformation(
-            "RegistrationHandler: client registered clientId={ClientId} clientName={ClientName}",
-            clientId, request.ClientName);
+            "RegistrationHandler: client registered clientIdFingerprint={ClientIdFingerprint} clientNameFingerprint={ClientNameFingerprint}",
+            OAuthLogValue.Fingerprint(clientId),
+            OAuthLogValue.Fingerprint(request.ClientName));
 
         return RegistrationResult.Success(new RegistrationResponse(
             ClientId: clientId,

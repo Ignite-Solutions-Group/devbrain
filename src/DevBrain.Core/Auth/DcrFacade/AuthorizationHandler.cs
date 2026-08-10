@@ -1,4 +1,5 @@
 using DevBrain.Core.Auth.Crypto;
+using DevBrain.Core.Auth.Logging;
 using DevBrain.Core.Auth.Models;
 using DevBrain.Core.Auth.Services;
 using Microsoft.Extensions.Logging;
@@ -45,11 +46,18 @@ public sealed class AuthorizationHandler
     public async Task<AuthorizationResult> HandleAsync(AuthorizationRequest request)
     {
         _logger?.LogInformation(
-            "AuthorizationHandler: request received clientId={ClientId} responseType={ResponseType} redirectUri={RedirectUri} hasState={HasState} codeChallengeMethod={CodeChallengeMethod}",
-            request.ClientId, request.ResponseType, request.RedirectUri, !string.IsNullOrEmpty(request.State), request.CodeChallengeMethod);
+            "AuthorizationHandler: request received clientIdFingerprint={ClientIdFingerprint} responseTypeCode={ResponseTypeCode} redirectUriFingerprint={RedirectUriFingerprint} hasState={HasState} codeChallengeMethodS256={CodeChallengeMethodS256}",
+            OAuthLogValue.Fingerprint(request.ClientId),
+            string.Equals(request.ResponseType, "code", StringComparison.Ordinal),
+            OAuthLogValue.Fingerprint(request.RedirectUri),
+            !string.IsNullOrEmpty(request.State),
+            string.Equals(request.CodeChallengeMethod, "S256", StringComparison.Ordinal));
 
         // RFC 6749 §4.1.1: response_type, client_id, redirect_uri are the structural inputs.
         // RFC 7636 §4.3: code_challenge + code_challenge_method are PKCE.
+        // These exact allowlist checks are security gates, not caller-controlled authentication
+        // bypasses. BuildAuthorizeUri is a pure constructor that later receives only configured and
+        // server-generated values; no caller-provided response type or PKCE method reaches it.
         if (string.IsNullOrEmpty(request.ClientId))
         {
             _logger?.LogWarning("AuthorizationHandler: rejected — missing client_id");
@@ -57,7 +65,7 @@ public sealed class AuthorizationHandler
         }
         if (request.ResponseType != "code")
         {
-            _logger?.LogWarning("AuthorizationHandler: rejected — unsupported response_type={ResponseType}", request.ResponseType);
+            _logger?.LogWarning("AuthorizationHandler: rejected — unsupported response_type");
             return AuthorizationResult.Error("unsupported_response_type", "Only response_type=code is supported.");
         }
         if (string.IsNullOrEmpty(request.RedirectUri))
@@ -72,7 +80,7 @@ public sealed class AuthorizationHandler
         }
         if (request.CodeChallengeMethod != "S256")
         {
-            _logger?.LogWarning("AuthorizationHandler: rejected — code_challenge_method={Method} (only S256)", request.CodeChallengeMethod);
+            _logger?.LogWarning("AuthorizationHandler: rejected — unsupported code_challenge_method (only S256)");
             return AuthorizationResult.Error("invalid_request", "code_challenge_method must be S256.");
         }
         if (!string.IsNullOrEmpty(request.Resource)
@@ -86,7 +94,9 @@ public sealed class AuthorizationHandler
         var client = await _store.GetClientAsync(request.ClientId);
         if (client is null)
         {
-            _logger?.LogWarning("AuthorizationHandler: rejected — unknown or expired clientId={ClientId}", request.ClientId);
+            _logger?.LogWarning(
+                "AuthorizationHandler: rejected — unknown or expired clientIdFingerprint={ClientIdFingerprint}",
+                OAuthLogValue.Fingerprint(request.ClientId));
             return AuthorizationResult.Error("invalid_client", "Unknown or expired client_id.");
         }
 
@@ -95,8 +105,9 @@ public sealed class AuthorizationHandler
         if (!client.RedirectUris.Any(u => string.Equals(u, request.RedirectUri, StringComparison.Ordinal)))
         {
             _logger?.LogWarning(
-                "AuthorizationHandler: rejected — redirect_uri {RedirectUri} not registered for clientId={ClientId}",
-                request.RedirectUri, request.ClientId);
+                "AuthorizationHandler: rejected — redirectUriFingerprint={RedirectUriFingerprint} not registered for clientIdFingerprint={ClientIdFingerprint}",
+                OAuthLogValue.Fingerprint(request.RedirectUri),
+                OAuthLogValue.Fingerprint(request.ClientId));
             return AuthorizationResult.Error("invalid_redirect_uri", "redirect_uri is not registered for this client_id.");
         }
 
@@ -126,8 +137,9 @@ public sealed class AuthorizationHandler
         var upstreamAuthorizeUri = _upstream.BuildAuthorizeUri(upstreamState, upstreamChallenge);
 
         _logger?.LogInformation(
-            "AuthorizationHandler: transaction persisted clientId={ClientId} upstreamState={UpstreamState} redirecting to Entra",
-            request.ClientId, upstreamState);
+            "AuthorizationHandler: transaction persisted clientIdFingerprint={ClientIdFingerprint} upstreamStateFingerprint={UpstreamStateFingerprint} redirecting to Entra",
+            OAuthLogValue.Fingerprint(request.ClientId),
+            OAuthLogValue.Fingerprint(upstreamState));
 
         return AuthorizationResult.Success(upstreamAuthorizeUri);
     }
