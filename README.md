@@ -273,7 +273,13 @@ Keep both windows as short as the client population allows. A longer access-toke
 
 ### VS Code / GitHub Copilot
 
-DevBrain 2.0 owns the `/mcp` protocol surface directly and returns the specification-required `401` plus `WWW-Authenticate: Bearer resource_metadata="..."` challenge. That removes the Azure Functions host-layer limitation that stopped VS Code and GitHub Copilot from starting OAuth in 1.x. End-to-end validation with these clients is still pending.
+DevBrain 2.0 owns the `/mcp` protocol surface directly and returns the specification-required `401` plus `WWW-Authenticate: Bearer resource_metadata="..."` challenge. That removes the Azure Functions host-layer limitation that stopped VS Code and GitHub Copilot from starting OAuth in 1.x. VS Code and GitHub Copilot now complete OAuth and use DevBrain's tools end to end.
+
+```
+https://<CONTAINER_APP_FQDN>/mcp
+```
+
+Add it as an HTTP MCP server. VS Code starts the Entra sign-in on first use.
 
 ### Cursor
 
@@ -468,7 +474,7 @@ The first use of each rotated refresh token also refreshes the upstream Entra se
 
 ## Client compatibility
 
-The 2.0 host keeps the same OAuth DCR flow as 1.x, and it also fixes the VS Code/Copilot challenge blocker. "Working" means the client works with DevBrain's OAuth flow in production use.
+The 2.0 host keeps the same OAuth DCR flow as 1.x and fixes the VS Code/Copilot challenge blocker. "Working" means the client works with DevBrain's OAuth flow in production use.
 
 | Client | Platform | Auth | Status |
 |--------|----------|------|--------|
@@ -480,7 +486,7 @@ The 2.0 host keeps the same OAuth DCR flow as 1.x, and it also fixes the VS Code
 | ChatGPT / Codex unified app | Windows | OAuth (DCR) | ✅ Working; monitoring continues |
 | Codex CLI | Windows Terminal | OAuth (DCR) | ✅ Working |
 | Codex CLI | WSL | OAuth (DCR) | ✅ Working |
-| VS Code / GitHub Copilot | Windows | OAuth (DCR) | 🧪 Challenge blocker fixed in 2.0; validation pending |
+| VS Code / GitHub Copilot | Windows | OAuth (DCR) | ✅ Working (new in 2.0) |
 | Cursor | — | OAuth (DCR) | Not tested |
 
 ## Contributing
