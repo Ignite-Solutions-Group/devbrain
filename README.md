@@ -283,7 +283,7 @@ Add it as an HTTP MCP server. VS Code starts the Entra sign-in on first use.
 
 ### Cursor
 
-Not yet validated. It's expected to work if the client supports MCP OAuth with DCR.
+Expected to work, because Cursor supports current MCP OAuth with DCR, but not yet validated. Connect it to `https://<CONTAINER_APP_FQDN>/mcp`.
 
 ## Session Startup / AGENTS.md
 
@@ -487,7 +487,7 @@ The 2.0 host keeps the same OAuth DCR flow as 1.x and fixes the VS Code/Copilot 
 | Codex CLI | Windows Terminal | OAuth (DCR) | ✅ Working |
 | Codex CLI | WSL | OAuth (DCR) | ✅ Working |
 | VS Code / GitHub Copilot | Windows | OAuth (DCR) | ✅ Working (new in 2.0) |
-| Cursor | — | OAuth (DCR) | Not tested |
+| Cursor | — | OAuth (DCR) | Expected to work; not yet validated |
 
 ## Contributing
 
