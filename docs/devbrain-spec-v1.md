@@ -1,5 +1,7 @@
 # DevBrain v1 — Sprint Spec
 
+> **Historical document.** This is the original v1 sprint spec, kept for context. It describes the retired Azure Functions host, a four-tool surface, and a pre-OAuth auth model. For current setup and usage, see the [README](../README.md) and [CHANGELOG](../CHANGELOG.md).
+
 **Repository:** `github.com/Ignite-Solutions-Group/devbrain`  
 **Purpose:** A remote MCP server that gives any AI tool (Claude web, Claude Code CLI, GitHub Copilot, Cursor) persistent, shared access to developer knowledge — sprint docs, architecture decisions, project state. One brain. Zero upload tax.  
 **Stack:** .NET 10 · C# 14 · Azure Functions (isolated worker) · Cosmos DB NoSQL · Entra ID · Bicep · `azd`  

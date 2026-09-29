@@ -26,9 +26,6 @@ bld/
 [Ll]og/
 [Ll]ogs/
 
-# Azure Functions
-local.settings.json
-
 # Azure Developer CLI
 .azure/
 
