@@ -9,9 +9,7 @@ param(
     [ValidateRange(1, 60)]
     [int]$MaximumAttempts = 12,
     [ValidateRange(1, 60)]
-    [int]$RetryDelaySeconds = 10,
-    [ValidateRange(0, 300)]
-    [int]$FunctionWarmupSeconds = 30
+    [int]$RetryDelaySeconds = 10
 )
 
 Set-StrictMode -Version Latest
@@ -102,9 +100,4 @@ for ($attempt = 1; $attempt -le $MaximumAttempts; $attempt++) {
         Write-Warning "Managed identity is not visible to Cosmos DB yet (attempt $attempt of $MaximumAttempts). Retrying in $RetryDelaySeconds seconds."
         Start-Sleep -Seconds $RetryDelaySeconds
     }
-}
-
-if ($FunctionWarmupSeconds -gt 0) {
-    Write-Host "Waiting $FunctionWarmupSeconds seconds for the Functions host to settle before deployment."
-    Start-Sleep -Seconds $FunctionWarmupSeconds
 }
