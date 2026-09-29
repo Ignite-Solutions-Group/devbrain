@@ -12,7 +12,7 @@ DevBrain 2.0 replaces the Azure Functions host with a standalone ASP.NET Core ho
 
 - Added `DevBrain.Server`, a .NET 10 Minimal API host using `ModelContextProtocol.AspNetCore` and the 2026-07-28 MCP specification revision. Its Streamable HTTP transport is stateless and exposed at `/mcp`.
 - Added a shared `DevBrain.Core` library for the Cosmos document services and the OAuth/DCR implementation.
-- Added application-owned ASP.NET Core authentication for the complete MCP protocol surface. Unauthenticated MCP requests receive `401` with a `WWW-Authenticate: Bearer resource_metadata="..."` challenge, which removes the Functions host-layer blocker for clients such as VS Code and GitHub Copilot.
+- Added application-owned ASP.NET Core authentication for the complete MCP protocol surface. Unauthenticated MCP requests receive `401` with a `WWW-Authenticate: Bearer resource_metadata="..."` challenge, which removes the Functions host-layer blocker for clients such as VS Code and GitHub Copilot. VS Code / GitHub Copilot now completes OAuth and works end to end.
 - Added single-tenant `DevBrain.User` app-role enforcement. Validated Entra role claims are persisted with the local OAuth session and rehydrated into the caller principal.
 - Added an anonymous `/healthz` process/readiness endpoint, configurable per-caller rate limiting, an explicit request-body limit, and optional explicit-origin CORS configuration.
 - Added Azure Container Apps infrastructure with native HTTPS ingress, a Basic Azure Container Registry, managed identity, Key Vault secret references, Application Insights through Azure Monitor OpenTelemetry, and `0`–`3` replica defaults at `0.5` vCPU / `1 GiB`.
@@ -58,7 +58,7 @@ DevBrain 2.0 replaces the Azure Functions host with a standalone ASP.NET Core ho
 - `dotnet list devbrain.slnx package --outdated` reports every direct reference current.
 - `dotnet list devbrain.slnx package --vulnerable --include-transitive` and `--deprecated --include-transitive` report no vulnerable or deprecated packages in any project.
 - `az bicep build --file infra/main.bicep` succeeds, the post-provision hook parses cleanly, and the container image builds from `src/DevBrain.Server/Dockerfile`.
-- The Container Apps host is deployed and serving the production environment. The unified ChatGPT/Codex Windows app completed OAuth with `DevBrain.User`, discovered all 12 tools, and read existing shared Cosmos documents.
+- The Container Apps host is deployed and serving the production environment. The unified ChatGPT/Codex Windows app completed OAuth with `DevBrain.User`, discovered all 12 tools, and read existing shared Cosmos documents. VS Code / GitHub Copilot completes OAuth and works end to end.
 
 ## [1.9.0] — 2026-04-15
 
