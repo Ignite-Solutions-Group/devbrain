@@ -6,7 +6,6 @@ using System.Security.Claims;
 using System.Text.Json.Nodes;
 using DevBrain.Core.Auth.Models;
 using DevBrain.Core.Auth.Services;
-using DevBrain.Functions.Tools;
 using DevBrain.Server.Authentication;
 using DevBrain.Server.Tools;
 using Microsoft.AspNetCore.Hosting;
@@ -64,21 +63,6 @@ public sealed class ServerEndpointTests : IClassFixture<DevBrainWebApplicationFa
     }
 
     [Fact]
-    public void ServerToolContractsMatchFunctionsCompatibilityHost()
-    {
-        var functionsContracts = ReadFunctionsContracts();
-        var serverContracts = ReadServerContracts();
-
-        Assert.Equal(functionsContracts.Length, serverContracts.Length);
-        for (var index = 0; index < functionsContracts.Length; index++)
-        {
-            Assert.Equal(functionsContracts[index].Name, serverContracts[index].Name);
-            Assert.Equal(functionsContracts[index].Description, serverContracts[index].Description);
-            Assert.Equal(functionsContracts[index].Parameters, serverContracts[index].Parameters);
-        }
-    }
-
-    [Fact]
     public async Task UserPolicyRequiresDevBrainUserRole()
     {
         var authorization = _factory.Services.GetRequiredService<IAuthorizationService>();
@@ -102,17 +86,17 @@ public sealed class ServerEndpointTests : IClassFixture<DevBrainWebApplicationFa
     [Fact]
     public async Task Healthz_IsAnonymousAndHealthy()
     {
-        using var response = await _client.GetAsync("/healthz");
+        using var response = await _client.GetAsync("/healthz", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
+        var body = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("healthy", body!["status"]);
     }
 
     [Fact]
     public async Task McpWithoutBearerToken_ReturnsProtectedResourceChallenge()
     {
-        using var response = await _client.PostAsync("/mcp", JsonContent.Create(new { }));
+        using var response = await _client.PostAsync("/mcp", JsonContent.Create(new { }), TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Equal(
@@ -123,10 +107,10 @@ public sealed class ServerEndpointTests : IClassFixture<DevBrainWebApplicationFa
     [Fact]
     public async Task ProtectedResourceMetadata_AdvertisesStatelessMcpResource()
     {
-        using var response = await _client.GetAsync("/.well-known/oauth-protected-resource");
+        using var response = await _client.GetAsync("/.well-known/oauth-protected-resource", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<Dictionary<string, object>>();
+        var body = await response.Content.ReadFromJsonAsync<Dictionary<string, object>>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("https://devbrain.example.com/mcp", body!["resource"].ToString());
     }
 
@@ -171,10 +155,10 @@ public sealed class ServerEndpointTests : IClassFixture<DevBrainWebApplicationFa
         request.Headers.Accept.ParseAdd("application/json");
         request.Headers.Accept.ParseAdd("text/event-stream");
 
-        using var response = await _client.SendAsync(request);
+        using var response = await _client.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var responseText = await response.Content.ReadAsStringAsync();
+        var responseText = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         var jsonText = response.Content.Headers.ContentType?.MediaType == "text/event-stream"
             ? responseText.Split('\n', StringSplitOptions.TrimEntries)
                 .Single(line => line.StartsWith("data: ", StringComparison.Ordinal))[6..]
@@ -185,74 +169,6 @@ public sealed class ServerEndpointTests : IClassFixture<DevBrainWebApplicationFa
             "2026-07-28",
             body!["result"]!["supportedVersions"]!.AsArray().Select(node => node!.GetValue<string>()));
     }
-
-    private static ToolContract[] ReadFunctionsContracts() =>
-        typeof(DocumentTools)
-            .GetMethods(BindingFlags.Instance | BindingFlags.Public)
-            .Select(method =>
-            {
-                var trigger = method.GetParameters()
-                    .SelectMany(parameter => parameter.GetCustomAttributesData())
-                    .SingleOrDefault(attribute => attribute.AttributeType.Name == "McpToolTriggerAttribute");
-                if (trigger is null)
-                {
-                    return null;
-                }
-
-                var parameters = method.GetParameters()
-                    .Select(parameter => (Parameter: parameter, Attribute: parameter.GetCustomAttributesData()
-                        .SingleOrDefault(attribute => attribute.AttributeType.Name == "McpToolPropertyAttribute")))
-                    .Where(item => item.Attribute is not null)
-                    .Select(item => new ToolParameterContract(
-                        Name: (string)item.Attribute!.ConstructorArguments[0].Value!,
-                        Description: (string)item.Attribute.ConstructorArguments[1].Value!,
-                        Type: item.Parameter.ParameterType,
-                        Required: (bool)item.Attribute.ConstructorArguments[2].Value!))
-                    .ToArray();
-
-                return new ToolContract(
-                    Name: (string)trigger.ConstructorArguments[0].Value!,
-                    Description: (string)trigger.ConstructorArguments[1].Value!,
-                    Parameters: parameters);
-            })
-            .Where(contract => contract is not null)
-            .Cast<ToolContract>()
-            .OrderBy(contract => contract.Name, StringComparer.Ordinal)
-            .ToArray();
-
-    private static ToolContract[] ReadServerContracts()
-    {
-        var nullability = new NullabilityInfoContext();
-        return typeof(ServerDocumentTools)
-            .GetMethods(BindingFlags.Instance | BindingFlags.Public)
-            .Select(method => (Method: method, Tool: method.GetCustomAttribute<McpServerToolAttribute>()))
-            .Where(item => item.Tool is not null)
-            .Select(item => new ToolContract(
-                Name: item.Tool!.Name!,
-                Description: item.Method.GetCustomAttribute<DescriptionAttribute>()!.Description,
-                Parameters: item.Method.GetParameters()
-                    .Select(parameter => new ToolParameterContract(
-                        Name: parameter.Name!,
-                        Description: parameter.GetCustomAttribute<DescriptionAttribute>()!.Description,
-                        Type: parameter.ParameterType,
-                        Required: parameter.ParameterType.IsValueType
-                            ? Nullable.GetUnderlyingType(parameter.ParameterType) is null
-                            : nullability.Create(parameter).ReadState == NullabilityState.NotNull))
-                    .ToArray()))
-            .OrderBy(contract => contract.Name, StringComparer.Ordinal)
-            .ToArray();
-    }
-
-    private sealed record ToolContract(
-        string Name,
-        string Description,
-        ToolParameterContract[] Parameters);
-
-    private sealed record ToolParameterContract(
-        string Name,
-        string Description,
-        Type Type,
-        bool Required);
 }
 
 public sealed class DevBrainWebApplicationFactory : WebApplicationFactory<Program>

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Reflection;
 using System.Text.Json;
 using System.Threading.RateLimiting;
 using Azure.Core;
@@ -176,7 +177,7 @@ builder.Services
         {
             Name = "DevBrain",
             Title = "DevBrain",
-            Version = "2.0.0",
+            Version = ServerVersion(),
             Description = "Persistent developer knowledge shared across MCP clients.",
         };
         options.ServerInstructions =
@@ -209,7 +210,8 @@ if (allowedOrigins.Length > 0)
 }
 
 app.Logger.LogInformation(
-    "DevBrain v2 configured MCP stateless=true accessTokenLifetimeMinutes={AccessTokenLifetimeMinutes} refreshReplayLifetimeMinutes={RefreshReplayLifetimeMinutes}",
+    "DevBrain {Version} configured MCP stateless=true accessTokenLifetimeMinutes={AccessTokenLifetimeMinutes} refreshReplayLifetimeMinutes={RefreshReplayLifetimeMinutes}",
+    ServerVersion(),
     (int)tokenHandlerOptions.AccessTokenLifetime.TotalMinutes,
     (int)tokenHandlerOptions.RefreshReplayLifetime.TotalMinutes);
 
@@ -254,5 +256,11 @@ static int ReadPositiveInt(IConfiguration config, string key, int defaultValue)
 
     return parsed;
 }
+
+// The release version lives in Directory.Build.props. InformationalVersion carries a "+<commit>"
+// suffix when source revision stamping is on, which serverInfo and logs don't need.
+static string ServerVersion() =>
+    typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
+    ?? "0.0.0";
 
 public partial class Program;

@@ -1,23 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <NoWarn>$(NoWarn);CA1707;CA2007</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.10" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
-    <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
+    <PackageReference Include="xunit.v3" Version="4.0.1" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\DevBrain.Functions\DevBrain.Functions.csproj" />
     <ProjectReference Include="..\..\src\DevBrain.Server\DevBrain.Server.csproj" />
   </ItemGroup>
 

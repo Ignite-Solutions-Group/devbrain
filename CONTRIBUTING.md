@@ -7,8 +7,7 @@ Thanks for your interest in contributing to DevBrain!
 1. **Prerequisites**
    - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
    - [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) (logged in via `az login`)
-   - A Cosmos DB account (or the [Cosmos DB Emulator](https://learn.microsoft.com/azure/cosmos-db/local-emulator))
-   - [Azure Functions Core Tools v4](https://learn.microsoft.com/azure/azure-functions/functions-run-local) only when changing the compatibility host
+   - A dev DevBrain environment to point at (Cosmos DB, storage, and Key Vault). The server authenticates to them with `DefaultAzureCredential`, so the key-based Cosmos DB Emulator isn't supported.
 
 2. **Clone and build**
    ```bash
@@ -19,29 +18,29 @@ Thanks for your interest in contributing to DevBrain!
 
 3. **Configure local settings**
 
-   Configure the required `CosmosDb__*`, `OAuth__*`, and `DataProtection__*` values through environment variables or .NET user secrets. The server intentionally fails fast when required values are absent.
+   Configure the required settings with .NET user secrets or environment variables. The server fails fast when any required value is missing. [Local Development](README.md#local-development) in the README lists every setting and the roles your `az login` identity needs.
 
 4. **Run locally**
    ```bash
    dotnet run --project src/DevBrain.Server
    ```
 
-   The v2 MCP endpoint is `/mcp` and the anonymous health endpoint is `/healthz`. For Functions compatibility-host work, configure `src/DevBrain.Functions/local.settings.json` and run `func start` from that directory.
+   The MCP endpoint is `/mcp` and the anonymous health endpoint is `/healthz`.
 
 ## Pull Request Process
 
 1. Fork the repository and create a feature branch from `main`.
 2. Make your changes. Keep commits focused and atomic.
-3. Ensure `dotnet build` completes with no warnings (warnings are treated as errors).
+3. Ensure `dotnet build` completes with no warnings (warnings are treated as errors) and `dotnet test --solution devbrain.slnx` passes. Tests run on xUnit v3 through Microsoft.Testing.Platform, which `global.json` opts into.
 4. For dependency changes, check the whole solution from the repository root before opening the PR:
    ```bash
    dotnet list devbrain.slnx package --vulnerable --include-transitive
-   dotnet list devbrain.slnx package --outdated --highest-patch
-   dotnet list devbrain.slnx package --outdated --include-transitive
-   dotnet list devbrain.slnx package --deprecated
+   dotnet list devbrain.slnx package --outdated
+   dotnet list devbrain.slnx package --deprecated --include-transitive
    ```
-5. Open a pull request against `main` with a clear description of the change.
-6. A maintainer will review and merge once CI passes.
+5. For a release, bump `<Version>` in `Directory.Build.props`. It's the single source for assembly versions and the MCP `serverInfo` version. Then add the matching `CHANGELOG.md` entry.
+6. Open a pull request against `main` with a clear description of the change.
+7. A maintainer will review and merge once CI passes.
 
 ## Code Style
 
