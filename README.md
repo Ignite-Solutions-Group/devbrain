@@ -1,6 +1,8 @@
 # DevBrain
 
-An Azure-native remote MCP server — built on Azure Functions and Cosmos DB — that gives any AI tool persistent, shared access to developer knowledge. One brain, zero upload tax, for teams already living in the Microsoft Azure dev ecosystem.
+An Azure-native remote MCP server built on ASP.NET Core, Azure Container Apps, and Cosmos DB. DevBrain gives AI tools persistent, shared access to developer knowledge across projects and clients.
+
+DevBrain 2.0 uses the official [Model Context Protocol (MCP) C# SDK](https://github.com/modelcontextprotocol/csharp-sdk) and implements the [2026-07-28 revision of the MCP specification](https://modelcontextprotocol.io/specification/2026-07-28). The protocol revision is intentionally pinned here: informal references to “MCP v2” can otherwise be confused with the C# SDK’s own 2.x package version.
 
 ## The Problem
 
@@ -39,8 +41,8 @@ DevBrain is the only approach that gives every AI tool (Claude, Copilot, Codex, 
           └──────────────────────┼──────────────────────┘
                                  │  MCP (Streamable HTTP + OAuth 2.0)
                         ┌────────▼─────────┐
-                        │ Azure Functions  │ ← DCR OAuth facade
-                        │    (DevBrain)    │   (Entra-backed)
+                        │ Container Apps   │ ← ASP.NET Core + MCP SDK
+                        │  (DevBrain 2.0)  │   OAuth facade (Entra-backed)
                         └────────┬─────────┘
                                  │  Managed Identity
                         ┌────────▼─────────┐
@@ -49,47 +51,170 @@ DevBrain is the only approach that gives every AI tool (Claude, Copilot, Codex, 
                         └──────────────────┘
 ```
 
+### Hosting defaults
+
+The MCP transport is stateless, so requests do not require session affinity or a distributed protocol-state cache. The template therefore does not provision Redis. It exposes a separate anonymous `/healthz` process/readiness endpoint rather than treating MCP JSON-RPC traffic as a health probe.
+
+| Setting | Default |
+|---------|---------|
+| Container Apps replicas | Minimum `0`, maximum `3` |
+| Container resources | `0.5` vCPU, `1 GiB` memory |
+| Public endpoint rate limit | `120` requests per `60` seconds per replica and authenticated object ID (IP fallback) |
+| Request body limit | `4 MiB` |
+| CORS | Disabled; configure explicit origins only when a browser client requires them |
+| Public edge | Native Container Apps HTTPS FQDN; no Front Door dependency |
+
+Minimum replicas are a latency/cost choice. This repository defaults to zero; latency-sensitive interactive deployments should consider one or more warm replicas, consistent with [Microsoft’s stateless MCP hosting guidance](https://techcommunity.microsoft.com/blog/appsonazureblog/mcp-just-went-stateless-%E2%80%94-what-the-2026-spec-changes-about-scaling-on-app-servic/4530222).
+
 ## Prerequisites
 
-- Azure subscription
+- An Azure subscription where you can create resources and role assignments (Owner, or Contributor + User Access Administrator)
+- Permission to create an app registration in the Entra tenant whose users will sign in (Application Developer or higher), and to assign users to its enterprise application
 - [Azure Developer CLI (`azd`)](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd)
+- [Azure CLI (`az`)](https://learn.microsoft.com/cli/azure/install-azure-cli), used for the Entra and verification commands below
+- [PowerShell 7 (`pwsh`)](https://learn.microsoft.com/powershell/scripting/install/installing-powershell), which runs the cross-platform post-provision hook
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
+
+Docker isn't required locally, because `azd` builds the container image remotely in Azure Container Registry.
 
 ## Deploy
 
+DevBrain is single-tenant: one deployment serves one Entra tenant. These steps take a fresh tenant from nothing to a working MCP endpoint.
+
+### 1. Create the Entra app registration
+
+DevBrain signs users in through one pre-registered Entra app. It asks Entra only for `openid profile offline_access`, so the app doesn't need an exposed API scope or extra API permissions.
+
+**Portal:** Entra ID → App registrations → New registration
+
+| Setting | Value |
+|---------|-------|
+| Name | `DevBrain` (any name works) |
+| Supported account types | **Accounts in this organizational directory only** (single tenant). Don't pick a multi-tenant option. |
+| Redirect URI | Leave blank for now. You'll add it in step 4, after the Container App host name exists. |
+
+Then, on the new registration:
+
+1. Copy the **Application (client) ID** and **Directory (tenant) ID** from the Overview page.
+2. **Certificates & secrets** → **New client secret**. Copy the secret **Value** now; Entra shows it only once. Note the expiry date (see [Operating notes](#operating-notes)).
+3. **App roles** → **Create app role**: display name `DevBrain User`, allowed member types **Users/Groups**, value **`DevBrain.User`**, enabled. `/mcp` rejects any caller without this role.
+4. If your tenant blocks user consent, open **API permissions** and select **Grant admin consent**. Otherwise, users consent to the basic sign-in scopes on first login.
+
+**Azure CLI equivalent:**
+
+```powershell
+az login --tenant <tenant-guid>
+$app = az ad app create --display-name DevBrain --sign-in-audience AzureADMyOrg | ConvertFrom-Json
+az ad sp create --id $app.appId | Out-Null   # creates the enterprise application used for role assignment
+$clientSecret = az ad app credential reset --id $app.appId --display-name devbrain --years 1 --query password -o tsv
+
+$roles = ConvertTo-Json -AsArray @(@{
+    allowedMemberTypes = @('User'); isEnabled = $true; value = 'DevBrain.User'
+    displayName = 'DevBrain User'; description = 'Can connect to DevBrain'; id = [guid]::NewGuid().ToString()
+})
+Set-Content -Path approles.json -Value $roles
+az ad app update --id $app.appId --app-roles approles.json
+Remove-Item approles.json
+
+$app.appId                                     # this is ENTRA_CLIENT_ID
+```
+
+### 2. Choose who can connect
+
+Entra ID → **Enterprise applications** → `DevBrain`:
+
+1. **Users and groups** → **Add user/group** → select the people or security groups (group assignment requires Entra ID P1 or higher) → role **DevBrain User**.
+2. Recommended: **Properties** → set **Assignment required?** to **Yes**. Entra then stops unassigned users at sign-in, instead of letting them sign in and get rejected by DevBrain.
+
+Role changes take effect the next time a client's short-lived access token refreshes, not immediately.
+
+### 3. Provision the Azure resources
+
 ```powershell
 azd init -t Ignite-Solutions-Group/devbrain
-azd env set ENTRA_TENANT_ID <your-tenant-guid>
-azd env set ENTRA_CLIENT_ID <your-entra-app-client-id>
-azd up
+azd auth login --tenant-id <tenant-guid>
+azd env new <env-name>                        # e.g. devbrain-prod; drives resource naming
+azd env set ENTRA_TENANT_ID <tenant-guid>
+azd env set ENTRA_CLIENT_ID <app-client-id>
+azd env set ENTRA_CLIENT_SECRET <client-secret-value>
+azd env set JWT_SIGNING_SECRET ([Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)))
+azd provision
 ```
 
-**Before `azd up`**, create a single Entra app registration in your tenant (see CHANGELOG v1.6.0 for the full prerequisite checklist). After deployment, populate the two Key Vault secrets:
+`azd provision` creates the Container App and its environment, Azure Container Registry, Cosmos DB, Storage, Key Vault, and Log Analytics with Application Insights. It also creates the managed-identity role assignments. The two secret values seed Key Vault through secure deployment parameters, so they never appear in plain deployment history.
 
-`ENTRA_TENANT_ID` and `ENTRA_CLIENT_ID` are Bicep-owned Function App settings. Keep them in the azd environment before running `azd provision` or `azd up`; `azd deploy` alone does not modify them.
+The post-provision hook finalizes the Container App's Cosmos DB data-role assignment. It retries while a newly created managed identity propagates through Entra, so the first deployment doesn't need a manual second provision. It's safe to rerun.
+
+`ENTRA_TENANT_ID` and `ENTRA_CLIENT_ID` stay in the azd environment, and every later `azd provision` or `azd up` re-applies them. After the first successful provision, you can clear the two bootstrap secrets from the local environment. Later provisions leave the existing Key Vault secrets unchanged:
 
 ```powershell
-az keyvault secret set --vault-name <kv-name> --name jwt-signing-secret --value $(openssl rand -base64 32)
-az keyvault secret set --vault-name <kv-name> --name entra-client-secret --value <secret-from-entra-app>
+azd env set ENTRA_CLIENT_SECRET ""
+azd env set JWT_SIGNING_SECRET ""
 ```
 
-Restart the Function App to pick up the Key Vault references, then connect any MCP client.
+### 4. Add the redirect URI
+
+```powershell
+azd env get-value OAUTH_REDIRECT_URI    # https://ca-devbrain-<token>.<region>.azurecontainerapps.io/callback
+```
+
+In the portal, open the app registration → **Authentication** → **Add a platform** → **Web**, and paste that value exactly. Or use the CLI:
+
+```powershell
+az ad app update --id <app-client-id> --web-redirect-uris (azd env get-value OAUTH_REDIRECT_URI)
+```
+
+### 5. Deploy the server
+
+```powershell
+azd deploy
+```
+
+After the first deployment, `azd up` (provision + deploy) is fine for later updates.
+
+### 6. Verify
+
+```powershell
+$url = azd env get-value AZURE_CONTAINER_APP_URL
+Invoke-RestMethod "$url/healthz"                                    # status: healthy
+Invoke-RestMethod "$url/.well-known/oauth-authorization-server"     # DevBrain's own issuer metadata
+```
+
+Then connect a client (see [Configure Your MCP Client](#configure-your-mcp-client)) at `$url/mcp`. The first tool call opens an Entra sign-in, and every write records the signed-in user's UPN in `updatedBy`.
+
+The Container App uses the platform-provided HTTPS host name. Front Door and a custom domain are optional additions, not requirements. If you add a custom domain, update `OAuth__BaseUrl` and `AllowedHosts` in `infra/main.bicep`, and the Entra redirect URI, to match.
 
 ## First Run
 
-After a fresh deployment, seed the default reference documents so any AI tool connecting to your new instance immediately has usage guidance available. Connect any authenticated MCP client and call:
+After a fresh deployment, seed the shared usage guide so any AI tool connecting to the new instance knows how to use DevBrain.
 
-```
-UpsertDocument(key="ref:devbrain-usage", project="default", content=<contents of docs/seed/ref-devbrain-usage.md>)
-```
+1. Edit the **Known Projects** list in [`docs/seed/ref-devbrain-usage.md`](docs/seed/ref-devbrain-usage.md) to name your organization's projects.
+2. From any connected MCP client (for example, Claude Code running in a clone of this repo), ask:
 
-Or use the seed script (requires a valid MCP connection):
+   > Read `docs/seed/ref-devbrain-usage.md` and store it in DevBrain with `UpsertDocument`, key `ref:devbrain-usage`, project `default`, tags `meta`, `instructions`, `usage`.
 
-```powershell
-./scripts/seed-devbrain.ps1
-```
+Re-running is safe because every upsert is a full overwrite. Seeding goes through a signed-in client because every DevBrain tool call requires a per-user OAuth token with the `DevBrain.User` role.
 
-Re-running is safe — every upsert is a full overwrite. Source content for the seed lives under [`docs/seed/`](docs/seed/).
+## Upgrading from 1.x (Azure Functions)
+
+DevBrain 2.0 removes the Azure Functions host. On an existing 1.x environment:
+
+1. On the existing Entra app, add the `DevBrain.User` app role and assign it (step 1, item 3, and step 2). Then, in the existing azd environment, run `azd provision`, add the new redirect URI (step 4), and run `azd deploy`. The Container App reads and writes the same Cosmos `documents` container, so no data migration is needed.
+2. Point every MCP client at `https://<container-app-fqdn>/mcp` in place of `https://<function-app>/runtime/webhooks/mcp`. Each client signs in once against the new endpoint.
+3. Once no client uses the old endpoint, delete the resources that `azd provision` no longer manages. Provisioning is incremental, so it doesn't remove them for you:
+   - the `func-devbrain-<token>` Function App and its `plan-devbrain-<token>` Flex Consumption plan. Deleting the Function App also removes its system-assigned identity; Azure then shows that identity's old role assignments as "Identity not found", and you can remove them.
+   - the `deploymentpackage` and `dataprotection-keys` blob containers in the storage account
+4. Remove the old Function App URL from the Entra app's redirect URIs.
+
+1.x OAuth records left in the `oauth_state` container expire on their own through Cosmos TTL.
+
+## Operating notes
+
+- **Client secret expiry.** When the Entra client secret expires, sign-ins and token refreshes fail. Before it expires, create a new secret and write it to the `entra-client-secret` Key Vault secret, either with `az keyvault secret set` or by setting `ENTRA_CLIENT_SECRET` and re-running `azd provision`. Container Apps picks up the new version within 30 minutes. To apply it immediately, restart the active revision with `az containerapp revision restart`.
+- **JWT signing secret rotation.** Replacing `jwt-signing-secret` invalidates every DevBrain access token already issued, so clients re-authenticate on their next call. It's the "sign everyone out" lever.
+- **Cold starts.** The template defaults to zero minimum replicas, so the first request after an idle period waits for a container to start. Set `containerAppMinReplicas` to `1` in `infra/main.bicep` if interactive latency matters more than idle cost.
+- **Cost profile.** The main fixed costs are Cosmos DB, which uses standard provisioned throughput rather than serverless, and the Basic Azure Container Registry. Container Apps compute scales to zero by default. Check the Cosmos throughput settings against your budget before a long-running trial.
+- **Tearing down a trial.** The Key Vault has purge protection on, so `azd down` leaves it soft-deleted for 90 days and its name can't be reused in that time. For another trial, create a new azd environment name (`azd env new`) rather than re-provisioning the old one.
 
 ## Configure Your MCP Client
 
@@ -98,7 +223,7 @@ DevBrain uses OAuth 2.0 with Dynamic Client Registration (DCR). Clients that sup
 ### Claude Code CLI
 
 ```bash
-claude mcp add devbrain --transport http https://<FUNCTION_URL>/runtime/webhooks/mcp
+claude mcp add devbrain --transport http https://<CONTAINER_APP_FQDN>/mcp
 ```
 
 On first use, Claude Code opens a browser for Entra login. Subsequent sessions re-use the stored token.
@@ -108,7 +233,7 @@ On first use, Claude Code opens a browser for Entra login. Subsequent sessions r
 Add as a custom MCP connector pointing at:
 
 ```
-https://<FUNCTION_URL>/runtime/webhooks/mcp
+https://<CONTAINER_APP_FQDN>/mcp
 ```
 
 OAuth completes automatically — no proxy, no function key, no manual headers.
@@ -118,7 +243,7 @@ OAuth completes automatically — no proxy, no function key, no manual headers.
 The modern unified ChatGPT/Codex app for Windows is currently working well with DevBrain OAuth. This is treated as operationally healthy but still under monitoring, rather than a permanent compatibility guarantee.
 
 ```bash
-codex mcp add devbrain --transport http https://<FUNCTION_URL>/runtime/webhooks/mcp
+codex mcp add devbrain --transport http https://<CONTAINER_APP_FQDN>/mcp
 ```
 
 ### OAuth token windows
@@ -131,29 +256,34 @@ Deployments can tune the access-token lifetime and refresh replay window when th
 azd env set OAUTH_ACCESS_TOKEN_LIFETIME_MINUTES 45
 azd env set OAUTH_REFRESH_REPLAY_LIFETIME_MINUTES 5
 azd provision
-azd deploy
 ```
 
-`azd provision` applies the Bicep app settings. `azd deploy` only deploys application code, so existing Function App settings persist across code-only updates. If the `OAUTH_*` values are not set in the azd environment, Bicep creates blank settings and DevBrain uses its built-in defaults.
+`azd provision` applies the settings to the Container App and rolls a new revision. `azd deploy` only deploys a new application image, so existing settings persist across code-only updates. If the `OAUTH_*` values are not set, DevBrain uses its built-in defaults.
 
-These `azd` values provision the Function App settings:
+These `azd` values provision the equivalent application settings:
 
 ```text
 OAuth__AccessTokenLifetimeMinutes=45
 OAuth__RefreshReplayLifetimeMinutes=5
 ```
 
-For a one-off test on an already-provisioned Function App, set the same `OAuth__*` app settings directly with Azure CLI or the portal, then restart the app. Both values must be whole minutes from 1 through 1,440. Defaults are 10 minutes for access tokens and 5 minutes for refresh replay markers.
+For a one-off test on an already-provisioned app, set the same `OAuth__*` environment variables on the Container App directly, which creates a new revision. Both values must be whole minutes from 1 through 1,440. Defaults are 10 minutes for access tokens and 5 minutes for refresh replay markers.
 
 Keep both windows as short as the client population allows. A longer access-token lifetime reduces refresh frequency but extends the useful lifetime of a stolen bearer token. A longer replay window makes an old refresh token reusable for longer and should only be used to accommodate a measured client retry interval.
 
 ### VS Code / GitHub Copilot
 
-⚠️ **Known issue:** The VS Code MCP extension connects successfully and discovers all tools, but does not trigger the OAuth flow. See [Known Limitations](#vs-code--github-copilot-mcp-extension--oauth-not-triggered) below for the full explanation and fix paths.
+DevBrain 2.0 owns the `/mcp` protocol surface directly and returns the specification-required `401` plus `WWW-Authenticate: Bearer resource_metadata="..."` challenge. That removes the Azure Functions host-layer limitation that stopped VS Code and GitHub Copilot from starting OAuth in 1.x. VS Code and GitHub Copilot now complete OAuth and use DevBrain's tools end to end.
+
+```
+https://<CONTAINER_APP_FQDN>/mcp
+```
+
+Add it as an HTTP MCP server. VS Code starts the Entra sign-in on first use.
 
 ### Cursor
 
-Not yet tested with v1.6 OAuth. Expected to work if the client supports MCP OAuth with DCR.
+Expected to work, because Cursor supports current MCP OAuth with DCR, but not yet validated. Connect it to `https://<CONTAINER_APP_FQDN>/mcp`.
 
 ## Session Startup / AGENTS.md
 
@@ -281,36 +411,51 @@ Keys use colon as the separator (e.g. `sprint:license-sync`). **Writes** (`Upser
 
 ## Local Development
 
-1. Install prerequisites: .NET 10 SDK, [Azure Functions Core Tools v4](https://learn.microsoft.com/azure/azure-functions/functions-run-local), Azure CLI.
+1. Install the .NET 10 SDK and Azure CLI.
 
-2. Log in to Azure (for Cosmos access via `DefaultAzureCredential`):
+2. Sign in to Azure so `DefaultAzureCredential` can reach the data services:
    ```powershell
    az login
    ```
+   Point local runs at a **dev** DevBrain environment, not production. Your identity needs **Cosmos DB Built-in Data Contributor** (a Cosmos SQL role assignment), **Storage Blob Data Contributor** on the storage account, and **Key Vault Crypto User** on the vault.
 
-3. Copy and configure local settings:
+3. Configure the required settings with .NET user secrets. The server fails fast at startup if any of these is missing:
    ```powershell
-   Copy-Item src/DevBrain.Functions/local.settings.json.example src/DevBrain.Functions/local.settings.json
-   # Edit with your Cosmos DB account endpoint
+   $p = 'src/DevBrain.Server'
+   dotnet user-secrets --project $p set CosmosDb:AccountEndpoint 'https://<cosmos-account>.documents.azure.com:443/'
+   dotnet user-secrets --project $p set OAuth:BaseUrl 'http://localhost:5000'
+   dotnet user-secrets --project $p set OAuth:EntraTenantId '<tenant-guid>'
+   dotnet user-secrets --project $p set OAuth:EntraClientId '<app-client-id>'
+   dotnet user-secrets --project $p set OAuth:EntraClientSecret '<client-secret>'
+   dotnet user-secrets --project $p set OAuth:JwtSigningSecret ([Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)))
+   dotnet user-secrets --project $p set DataProtection:BlobUri 'https://<storage-account>.blob.core.windows.net/dataprotection-keys-v2/keys.xml'
+   dotnet user-secrets --project $p set DataProtection:KeyVaultKeyUri 'https://<key-vault>.vault.azure.net/keys/data-protection-key'
+   ```
+   Add `http://localhost:5000/callback` as a second **Web** redirect URI on the Entra app to sign in against the local server.
+
+4. Run the server:
+   ```powershell
+   dotnet run --project src/DevBrain.Server
+   ```
+   The local MCP endpoint is `http://localhost:5000/mcp`, and `/healthz` is anonymous.
+
+5. Run the tests. They use xUnit v3 on Microsoft.Testing.Platform, which `global.json` opts into:
+   ```powershell
+   dotnet test --solution devbrain.slnx
    ```
 
-4. Run:
-   ```powershell
-   cd src/DevBrain.Functions
-   func start
-   ```
-
-5. Optional dependency health checks from the repository root:
+6. Optional dependency health checks from the repository root:
    ```powershell
    dotnet list devbrain.slnx package --vulnerable --include-transitive
-   dotnet list devbrain.slnx package --outdated --highest-patch
-   dotnet list devbrain.slnx package --outdated --include-transitive
-   dotnet list devbrain.slnx package --deprecated
+   dotnet list devbrain.slnx package --outdated
+   dotnet list devbrain.slnx package --deprecated --include-transitive
    ```
 
 ## Authentication
 
 DevBrain implements RFC 7591 Dynamic Client Registration (DCR) with an in-process OAuth proxy that brokers a single pre-registered Entra app. From the client's perspective, DevBrain *is* the authorization server. Internally it delegates to your tenant's Entra ID for user authentication.
+
+The 2026-07-28 specification deprecates DCR in favor of Client ID Metadata Documents but retains it for backward compatibility. DevBrain keeps DCR for the clients in its compatibility matrix while honoring the revision's authorization hardening: `application_type` metadata, RFC 8707 resource binding, and RFC 9207 issuer identification on authorization responses.
 
 This solves two problems that previously blocked MCP OAuth:
 
@@ -319,28 +464,17 @@ This solves two problems that previously blocked MCP OAuth:
 
 Every write operation records the authenticated user's Entra UPN in the `updatedBy` field.
 
+The deployment is intentionally single-tenant. Validated Entra `roles` claims are carried into the local DevBrain session, and `/mcp` requires the `DevBrain.User` app role. There is no application-level administrator role or maintenance endpoint; administration is performed through Azure and Entra control planes.
+
 ### Refresh Token Rotation
 
 Access tokens are short-lived and DevBrain refresh tokens rotate on every refresh. By default, the old refresh token becomes a five-minute replay marker that points at the replacement token, which makes immediate MCP client retries idempotent without reopening the OAuth flow. Replays outside the configured window still fail with `invalid_grant`, and every successful refresh or replay extends the upstream token vault record for the same local refresh window. See [OAuth token windows](#oauth-token-windows) for configuration and security tradeoffs.
 
-## Known Limitations
+The first use of each rotated refresh token also refreshes the upstream Entra session and revalidates tenant, user identity, and app-role claims. Assignment changes therefore take effect when the current short-lived access token expires rather than remaining cached for the full local refresh-token lifetime.
 
-### VS Code / GitHub Copilot MCP extension — OAuth not triggered
+## Client compatibility
 
-VS Code connects to the MCP endpoint, gets a 200 OK on `tools/list`, discovers all 7 tools, and proceeds as if no auth is required. Tool calls then fail with a missing Bearer token. **VS Code's behavior is correct per the MCP authorization spec** — the spec requires the server to challenge unauthenticated requests with `401 + WWW-Authenticate: Bearer resource_metadata="..."`, at which point the client reads PRM and starts OAuth.
-
-**Why DevBrain returns 200 here:** `initialize` and `tools/list` are handled by the Azure Functions MCP extension at the host process layer and never dispatch a function, so DevBrain's JWT middleware (which runs in the isolated worker) never sees them. The extension assumes Microsoft's documented deployment pattern — App Service Auth in front of the extension, owning the 401 challenge. DevBrain can't use that pattern because enabling App Service Auth with Entra would make the PRM advertise `login.microsoftonline.com` as the authorization server, which Claude.ai web ignores ([anthropics/claude-ai-mcp#82](https://github.com/anthropics/claude-ai-mcp/issues/82)), breaking a client that currently works.
-
-Other clients work because they probe PRM proactively rather than waiting to be challenged. VS Code follows the spec strictly.
-
-**Workaround:** None currently.
-
-**Fix paths (future DevBrain versions):**
-
-1. File a feature request against [`Azure/azure-functions-mcp-extension`](https://github.com/Azure/azure-functions-mcp-extension) for a pluggable auth hook at the host layer so custom OAuth servers can gate the MCP protocol surface.
-2. Replace the extension's webhook handler with a custom anonymous HTTP trigger implementing `initialize`, `tools/list`, and `tools/call` directly, under DevBrain's JWT middleware.
-
-### Client compatibility (v1.6.0)
+The 2.0 host keeps the same OAuth DCR flow as 1.x and fixes the VS Code/Copilot challenge blocker. "Working" means the client works with DevBrain's OAuth flow in production use.
 
 | Client | Platform | Auth | Status |
 |--------|----------|------|--------|
@@ -349,11 +483,11 @@ Other clients work because they probe PRM proactively rather than waiting to be 
 | Claude Code | claude.ai web | OAuth (DCR) | ✅ Working |
 | Claude Desktop | Windows | OAuth (DCR) | ✅ Working |
 | Claude Mobile | Android | OAuth (DCR) | ✅ Working |
-| ChatGPT / Codex unified app | Windows | OAuth (DCR) | ✅ Working; monitoring |
+| ChatGPT / Codex unified app | Windows | OAuth (DCR) | ✅ Working; monitoring continues |
 | Codex CLI | Windows Terminal | OAuth (DCR) | ✅ Working |
 | Codex CLI | WSL | OAuth (DCR) | ✅ Working |
-| VS Code / GitHub Copilot | Windows | OAuth (DCR) | ⚠️ [See above](#vs-code--github-copilot-mcp-extension--oauth-not-triggered) |
-| Cursor | — | OAuth (DCR) | Not tested |
+| VS Code / GitHub Copilot | Windows | OAuth (DCR) | ✅ Working (new in 2.0) |
+| Cursor | — | OAuth (DCR) | Expected to work; not yet validated |
 
 ## Contributing
 
