@@ -1,18 +1,20 @@
 # DevBrain — Usage Guide for AI Assistants
 
-## Important: Documents Are Scoped by Project
+## Important: Keys Include the Project
 
-DevBrain organizes documents by project. If a query returns no results, you are likely searching the wrong project scope.
+DevBrain organizes documents by project, but a key identifies one document across the whole store; `project` filters reads and isn't part of a document's identity.
 
-**Always specify the project parameter explicitly.** Use `default` for shared reference docs or quick sandboxing, and use named projects like `devbrain` for real project state.
+**Every key starts with its project name, and every call passes the project.** For example, use `key: "devbrain:state:current"` with `project: "devbrain"`. Two projects that both write an unprefixed `state:current` overwrite each other.
+
+Unprefixed keys belong to the `default` project, which holds general DevBrain instructions such as this guide (`ref:devbrain-usage`). Calls that omit `project` read and write `default`. If a query returns no results, check the key's project prefix and the project scope.
 
 ## Known Projects
 - `devbrain` — DevBrain's own documentation, architecture, sprint docs, backlog, known issues
 
 ## Session Startup Pattern
 For any project, the correct session startup is:
-1. `GetDocument(key="state:current", project="{project}")` — load current state
-2. If working a sprint: `GetDocument(key="sprint:{name}", project="{project}")` — load active spec
+1. `GetDocument(key="{project}:state:current", project="{project}")` — load current state
+2. If working a sprint: `GetDocument(key="{project}:sprint:{name}", project="{project}")` — load active spec
 3. Updates: write directly with `UpsertDocument` — no manual upload needed
 
 This replaces any manual file upload workflow. DevBrain is the canonical source.
@@ -33,7 +35,7 @@ ListDocuments(project: "devbrain")
 
 ### Get a specific document
 ```
-GetDocument(key: "state:current", project: "devbrain")
+GetDocument(key: "devbrain:state:current", project: "devbrain")
 ```
 
 ### Search across a project
@@ -47,7 +49,7 @@ Before importing or syncing a document, check whether the stored version is alre
 
 ### Quick existence and size check
 ```
-GetDocumentMetadata(key: "sprint:license-sync", project: "devbrain")
+GetDocumentMetadata(key: "devbrain:sprint:license-sync", project: "devbrain")
 ```
 Returns key, project, tags, updatedAt, updatedBy, contentHash (SHA-256), and contentLength (character count) — **without** the content body. Use this to:
 - Check if a document exists
@@ -56,7 +58,7 @@ Returns key, project, tags, updatedAt, updatedBy, contentHash (SHA-256), and con
 
 ### Confirm content matches before skipping a write
 ```
-CompareDocument(key: "sprint:license-sync", content: "...candidate text...", project: "devbrain")
+CompareDocument(key: "devbrain:sprint:license-sync", content: "...candidate text...", project: "devbrain")
 ```
 Returns `{ found, match, storedContentHash, candidateHash, ... }`. The server hashes the candidate content and compares against the stored hash. You can also pass a precomputed `contentHash` instead of raw content.
 
@@ -133,22 +135,26 @@ The server applies the diff:
 
 ## Key Conventions
 
+Every project key starts with the project name. Unprefixed keys are only for general DevBrain material in the `default` project.
+
 Keys use **colon** as the separator. Slash-separated keys (`sprint/foo`) still work for backward compatibility, but colons are the canonical, recommended convention — they signal "DevBrain key" at a glance and avoid being confused with file paths.
 
 | Prefix | Use |
 |---|---|
-| `sprint:{name}` | Sprint specs and retrospectives |
-| `state:current` | Current project state |
-| `arch:{name}` | Architecture docs |
-| `decision:{name}` | Architecture decision records |
-| `ref:{name}` | Reference material |
+| `{project}:sprint:{name}` | Sprint specs and retrospectives |
+| `{project}:state:current` | Current project state |
+| `{project}:arch:{name}` | Architecture docs |
+| `{project}:decision:{name}` | Architecture decision records |
+| `{project}:ref:{name}` | Project reference material |
+| `ref:{name}` | General DevBrain reference material in the `default` project |
 
 ## If You Get No Results
-1. Check casing — project names and keys are case sensitive
-2. Try specifying the project explicitly
-3. Use ListDocuments with no prefix to see what's stored in that project
-4. Try SearchDocuments with a broad keyword
-5. The document may not exist yet — ask the user if they'd like to create it
+1. Check that the key starts with the project name, e.g. `devbrain:state:current`
+2. Check casing — project names and keys are case sensitive
+3. Try specifying the project explicitly
+4. Use ListDocuments with no prefix to see what's stored in that project
+5. Try SearchDocuments with a broad keyword
+6. The document may not exist yet — ask the user if they'd like to create it
 
 ## Frequently Asked Questions
 
