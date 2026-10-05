@@ -192,14 +192,20 @@ DevBrain can publish through an Azure Front Door Standard or Premium profile you
 azd env set CUSTOM_DOMAIN_NAME devbrain.contoso.com
 azd env set FRONT_DOOR_PROFILE_NAME <front-door-profile>
 azd env set FRONT_DOOR_RESOURCE_GROUP <front-door-resource-group>
+azd env set FRONT_DOOR_SUBSCRIPTION_ID <subscription-id>  # only when the profile is in another subscription
 azd env set DNS_ZONE_NAME contoso.com                     # optional: Azure DNS zone that hosts the domain
 azd env set DNS_ZONE_RESOURCE_GROUP <dns-zone-resource-group>
+azd env set DNS_ZONE_SUBSCRIPTION_ID <subscription-id>    # only when the zone is in another subscription
 azd env set FRONT_DOOR_ALLOWED_COUNTRIES US               # optional: comma-separated country allow list
 azd env set FRONT_DOOR_SKU Premium_AzureFrontDoor         # only for a Premium profile
 azd provision
 ```
 
+The Front Door profile and DNS zone can be in other subscriptions of the same tenant. The Front Door resource group and subscription default to DevBrain's own, and the DNS zone's default to the Front Door profile's. The identity that runs `azd provision` needs to be able to deploy into each of those resource groups.
+
 `CUSTOM_DOMAIN_NAME` becomes the OAuth issuer, the protected-resource URL, and the redirect URI, so register the new `OAUTH_REDIRECT_URI` on the Entra app (step 4). With `DNS_ZONE_NAME` set, provisioning creates the CNAME and the `_dnsauth` validation TXT record. Without it, create both records yourself, using the `FRONT_DOOR_ENDPOINT_HOST_NAME` and `FRONT_DOOR_DOMAIN_VALIDATION_TOKEN` outputs. Front Door issues the managed certificate after it validates the domain, which can take several minutes.
+
+To move an existing deployment behind Front Door, add the new redirect URI to the Entra app before you provision, and keep the old one until every client has moved. As soon as provisioning finishes, the Container Apps URL rejects MCP traffic, so point each client at `DEVBRAIN_MCP_URL` and sign in again. Remove the old redirect URI once nothing uses it.
 
 The WAF policy uses custom rules only, so it works on the Standard tier:
 

@@ -58,6 +58,9 @@ param frontDoorProfileName string = ''
 @description('Resource group of the Front Door profile. Defaults to this deployment\'s resource group.')
 param frontDoorResourceGroupName string = ''
 
+@description('Subscription ID of the Front Door profile. Defaults to this deployment\'s subscription.')
+param frontDoorSubscriptionId string = ''
+
 @description('SKU of the existing Front Door profile; the DevBrain WAF policy is created with the matching SKU.')
 @allowed([
   'Standard_AzureFrontDoor'
@@ -70,6 +73,9 @@ param dnsZoneName string = ''
 
 @description('Resource group of the Azure DNS zone. Defaults to the Front Door resource group.')
 param dnsZoneResourceGroupName string = ''
+
+@description('Subscription ID of the Azure DNS zone. Defaults to the Front Door subscription.')
+param dnsZoneSubscriptionId string = ''
 
 @description('Optional comma-separated two-letter country codes the Front Door WAF allows, for example "US,CA". Empty allows every country.')
 param frontDoorAllowedCountryCodes string = ''
@@ -333,30 +339,34 @@ var containerAppBaseUrl = 'https://${containerAppHostName}'
 var publicBaseUrl = empty(customDomainName) ? containerAppBaseUrl : 'https://${customDomainName}'
 var allowedHosts = empty(customDomainName) ? containerAppHostName : '${customDomainName};${containerAppHostName}'
 
+// The Front Door profile and DNS zone may live in other subscriptions of the same tenant, for example a
+// shared edge subscription and a shared DNS subscription.
 var useFrontDoor = !empty(frontDoorProfileName) && !empty(customDomainName)
+var frontDoorSubscription = empty(frontDoorSubscriptionId) ? subscription().subscriptionId : frontDoorSubscriptionId
 var frontDoorResourceGroup = empty(frontDoorResourceGroupName) ? resourceGroup().name : frontDoorResourceGroupName
 var useFrontDoorDns = useFrontDoor && !empty(dnsZoneName)
+var dnsZoneSubscription = empty(dnsZoneSubscriptionId) ? frontDoorSubscription : dnsZoneSubscriptionId
 var dnsZoneResourceGroup = empty(dnsZoneResourceGroupName) ? frontDoorResourceGroup : dnsZoneResourceGroupName
 var normalizedDnsZoneName = toLower(dnsZoneName)
 var normalizedCustomDomainName = toLower(customDomainName)
 
 module frontDoor 'modules/front-door.bicep' = if (useFrontDoor) {
   name: 'devbrain-front-door-${substring(resourceToken, 0, 6)}'
-  scope: resourceGroup(frontDoorResourceGroup)
+  scope: resourceGroup(frontDoorSubscription, frontDoorResourceGroup)
   params: {
     profileName: frontDoorProfileName
     skuName: frontDoorSkuName
     resourceToken: substring(resourceToken, 0, 6)
     customDomainName: normalizedCustomDomainName
     originHostName: containerAppHostName
-    dnsZoneId: useFrontDoorDns ? resourceId(subscription().subscriptionId, dnsZoneResourceGroup, 'Microsoft.Network/dnsZones', normalizedDnsZoneName) : ''
+    dnsZoneId: useFrontDoorDns ? resourceId(dnsZoneSubscription, dnsZoneResourceGroup, 'Microsoft.Network/dnsZones', normalizedDnsZoneName) : ''
     allowedCountryCodes: empty(frontDoorAllowedCountryCodes) ? [] : map(split(frontDoorAllowedCountryCodes, ','), code => toUpper(trim(code)))
   }
 }
 
 module frontDoorDns 'modules/front-door-dns.bicep' = if (useFrontDoorDns) {
   name: 'devbrain-front-door-dns-${substring(resourceToken, 0, 6)}'
-  scope: resourceGroup(dnsZoneResourceGroup)
+  scope: resourceGroup(dnsZoneSubscription, dnsZoneResourceGroup)
   params: {
     dnsZoneName: normalizedDnsZoneName
     // The custom domain must sit below the zone apex, for example devbrain.contoso.com in contoso.com.

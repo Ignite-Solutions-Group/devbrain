@@ -41,11 +41,17 @@
     "frontDoorResourceGroupName": {
       "value": "${FRONT_DOOR_RESOURCE_GROUP=}"
     },
+    "frontDoorSubscriptionId": {
+      "value": "${FRONT_DOOR_SUBSCRIPTION_ID=}"
+    },
     "dnsZoneName": {
       "value": "${DNS_ZONE_NAME=}"
     },
     "dnsZoneResourceGroupName": {
       "value": "${DNS_ZONE_RESOURCE_GROUP=}"
+    },
+    "dnsZoneSubscriptionId": {
+      "value": "${DNS_ZONE_SUBSCRIPTION_ID=}"
     },
     "frontDoorAllowedCountryCodes": {
       "value": "${FRONT_DOOR_ALLOWED_COUNTRIES=}"
