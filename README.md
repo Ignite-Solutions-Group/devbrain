@@ -62,7 +62,7 @@ The MCP transport is stateless, so requests do not require session affinity or a
 | Public endpoint rate limit | `120` requests per `60` seconds per replica and authenticated object ID (IP fallback) |
 | Request body limit | `4 MiB` |
 | CORS | Disabled; configure explicit origins only when a browser client requires them |
-| Public edge | Native Container Apps HTTPS FQDN; no Front Door dependency |
+| Public edge | Native Container Apps HTTPS FQDN; no Front Door dependency (optionally an existing Front Door profile with a custom domain and WAF) |
 
 Minimum replicas are a latency/cost choice. This repository defaults to zero; latency-sensitive interactive deployments should consider one or more warm replicas, consistent with [Microsoft’s stateless MCP hosting guidance](https://techcommunity.microsoft.com/blog/appsonazureblog/mcp-just-went-stateless-%E2%80%94-what-the-2026-spec-changes-about-scaling-on-app-servic/4530222).
 
@@ -108,10 +108,10 @@ $app = az ad app create --display-name DevBrain --sign-in-audience AzureADMyOrg 
 az ad sp create --id $app.appId | Out-Null   # creates the enterprise application used for role assignment
 $clientSecret = az ad app credential reset --id $app.appId --display-name devbrain --years 1 --query password -o tsv
 
-$roles = ConvertTo-Json -AsArray @(@{
+$roles = @(@{
     allowedMemberTypes = @('User'); isEnabled = $true; value = 'DevBrain.User'
     displayName = 'DevBrain User'; description = 'Can connect to DevBrain'; id = [guid]::NewGuid().ToString()
-})
+}) | ConvertTo-Json -Depth 5 -AsArray
 Set-Content -Path approles.json -Value $roles
 az ad app update --id $app.appId --app-roles approles.json
 Remove-Item approles.json
@@ -155,7 +155,7 @@ azd env set JWT_SIGNING_SECRET ""
 ### 4. Add the redirect URI
 
 ```powershell
-azd env get-value OAUTH_REDIRECT_URI    # https://ca-devbrain-<token>.<region>.azurecontainerapps.io/callback
+azd env get-value OAUTH_REDIRECT_URI    # https://ca-devbrain-<token>.<region>.azurecontainerapps.io/callback, or https://<CUSTOM_DOMAIN_NAME>/callback
 ```
 
 In the portal, open the app registration → **Authentication** → **Add a platform** → **Web**, and paste that value exactly. Or use the CLI:
@@ -175,14 +175,44 @@ After the first deployment, `azd up` (provision + deploy) is fine for later upda
 ### 6. Verify
 
 ```powershell
-$url = azd env get-value AZURE_CONTAINER_APP_URL
+$url = azd env get-value DEVBRAIN_PUBLIC_URL
 Invoke-RestMethod "$url/healthz"                                    # status: healthy
 Invoke-RestMethod "$url/.well-known/oauth-authorization-server"     # DevBrain's own issuer metadata
 ```
 
-Then connect a client (see [Configure Your MCP Client](#configure-your-mcp-client)) at `$url/mcp`. The first tool call opens an Entra sign-in, and every write records the signed-in user's UPN in `updatedBy`.
+Then connect a client (see [Configure Your MCP Client](#configure-your-mcp-client)) at `$url/mcp` (also available as `azd env get-value DEVBRAIN_MCP_URL`). The first tool call opens an Entra sign-in, and every write records the signed-in user's UPN in `updatedBy`.
 
-The Container App uses the platform-provided HTTPS host name. Front Door and a custom domain are optional additions, not requirements. If you add a custom domain, update `OAuth__BaseUrl` and `AllowedHosts` in `infra/main.bicep`, and the Entra redirect URI, to match.
+By default the Container App uses the platform-provided HTTPS host name, and `DEVBRAIN_PUBLIC_URL` is that host name. A custom domain and Azure Front Door are optional; see the next section.
+
+### Optional: custom domain and Azure Front Door
+
+DevBrain can publish through an Azure Front Door Standard or Premium profile you already have. The template adds a dedicated endpoint, route, origin, custom domain with a managed certificate, and a WAF policy to that profile. It doesn't change the profile's existing routes, WAF policies, or security policies. Set these values before `azd provision`, ideally before any client connects, because changing the public URL makes every client sign in again:
+
+```powershell
+azd env set CUSTOM_DOMAIN_NAME devbrain.contoso.com
+azd env set FRONT_DOOR_PROFILE_NAME <front-door-profile>
+azd env set FRONT_DOOR_RESOURCE_GROUP <front-door-resource-group>
+azd env set DNS_ZONE_NAME contoso.com                     # optional: Azure DNS zone that hosts the domain
+azd env set DNS_ZONE_RESOURCE_GROUP <dns-zone-resource-group>
+azd env set FRONT_DOOR_ALLOWED_COUNTRIES US               # optional: comma-separated country allow list
+azd env set FRONT_DOOR_SKU Premium_AzureFrontDoor         # only for a Premium profile
+azd provision
+```
+
+`CUSTOM_DOMAIN_NAME` becomes the OAuth issuer, the protected-resource URL, and the redirect URI, so register the new `OAUTH_REDIRECT_URI` on the Entra app (step 4). With `DNS_ZONE_NAME` set, provisioning creates the CNAME and the `_dnsauth` validation TXT record. Without it, create both records yourself, using the `FRONT_DOOR_ENDPOINT_HOST_NAME` and `FRONT_DOOR_DOMAIN_VALIDATION_TOKEN` outputs. Front Door issues the managed certificate after it validates the domain, which can take several minutes.
+
+The WAF policy uses custom rules only, so it works on the Standard tier:
+
+| Rule | Behavior |
+|------|----------|
+| Country allow list | Blocks clients outside `FRONT_DOOR_ALLOWED_COUNTRIES` when set |
+| Path allow list | Blocks anything other than `/mcp`, `/.well-known/*`, `/register`, `/authorize`, `/callback`, `/token`, and `/healthz` |
+| OAuth rate limit | `30` requests per minute per client IP to `/register`, `/authorize`, `/callback`, and `/token` |
+| Overall rate limit | `1000` requests per five minutes per client IP |
+
+With Front Door enabled, the app also sets `FrontDoor__Id` to the profile's ID and rejects any request without the matching `X-Azure-FDID` header. As a result, the `*.azurecontainerapps.io` host name can't be used to bypass the WAF. `/healthz` stays open for Container Apps health probes.
+
+To use a custom domain without Front Door, set only `CUSTOM_DOMAIN_NAME` and [bind the domain to the Container App](https://learn.microsoft.com/azure/container-apps/custom-domains-managed-certificates) yourself.
 
 ## First Run
 
@@ -213,12 +243,15 @@ DevBrain 2.0 removes the Azure Functions host. On an existing 1.x environment:
 - **Client secret expiry.** When the Entra client secret expires, sign-ins and token refreshes fail. Before it expires, create a new secret and write it to the `entra-client-secret` Key Vault secret, either with `az keyvault secret set` or by setting `ENTRA_CLIENT_SECRET` and re-running `azd provision`. Container Apps picks up the new version within 30 minutes. To apply it immediately, restart the active revision with `az containerapp revision restart`.
 - **JWT signing secret rotation.** Replacing `jwt-signing-secret` invalidates every DevBrain access token already issued, so clients re-authenticate on their next call. It's the "sign everyone out" lever.
 - **Cold starts.** The template defaults to zero minimum replicas, so the first request after an idle period waits for a container to start. Set `containerAppMinReplicas` to `1` in `infra/main.bicep` if interactive latency matters more than idle cost.
-- **Cost profile.** The main fixed costs are Cosmos DB, which uses standard provisioned throughput rather than serverless, and the Basic Azure Container Registry. Container Apps compute scales to zero by default. Check the Cosmos throughput settings against your budget before a long-running trial.
+- **Cost profile.** The main fixed costs are Cosmos DB, which uses standard provisioned throughput by default, and the Basic Azure Container Registry. Container Apps compute scales to zero by default. Check the Cosmos throughput settings against your budget before a long-running trial.
+- **Serverless Cosmos DB.** If the subscription's one free-tier Cosmos account is already in use, run `azd env set COSMOS_SERVERLESS true` before the first `azd provision`. Cosmos DB then bills per request and per GB stored, which is usually far cheaper for a small team's knowledge store, at the cost of no throughput or latency guarantees. Cosmos DB fixes the capacity mode when it creates the account, so set this before the first provision.
 - **Tearing down a trial.** The Key Vault has purge protection on, so `azd down` leaves it soft-deleted for 90 days and its name can't be reused in that time. For another trial, create a new azd environment name (`azd env new`) rather than re-provisioning the old one.
 
 ## Configure Your MCP Client
 
 DevBrain uses OAuth 2.0 with Dynamic Client Registration (DCR). Clients that support the MCP OAuth spec connect with just a URL — no API keys, no manual configuration, no local proxies. The server handles registration, authorization, and token exchange automatically via the built-in DCR facade backed by your Entra tenant.
+
+The examples below use the default Container Apps host name. If you set `CUSTOM_DOMAIN_NAME`, use that host instead; `azd env get-value DEVBRAIN_MCP_URL` prints the exact URL.
 
 ### Claude Code CLI
 

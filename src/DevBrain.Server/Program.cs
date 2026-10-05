@@ -16,6 +16,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Azure.Cosmos;
+using Microsoft.Extensions.Primitives;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using ModelContextProtocol.AspNetCore;
@@ -186,9 +187,28 @@ builder.Services
     .WithHttpTransport(options => options.Stateless = true)
     .WithTools<ServerDocumentTools>();
 
+var frontDoorId = configuration["FrontDoor:Id"]?.Trim();
+
 var app = builder.Build();
 
 app.UseExceptionHandler();
+if (!string.IsNullOrEmpty(frontDoorId))
+{
+    // Only accept traffic stamped by this deployment's Azure Front Door profile, so the platform host
+    // name can't be used to bypass the edge WAF. /healthz stays reachable for Container Apps probes,
+    // which connect to the replica directly.
+    app.Use(async (context, next) =>
+    {
+        if (context.Request.Path.Equals("/healthz", StringComparison.OrdinalIgnoreCase)
+            || IsFromFrontDoor(context.Request.Headers["X-Azure-FDID"], frontDoorId))
+        {
+            await next(context);
+            return;
+        }
+
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+    });
+}
 if (allowedOrigins.Length > 0)
 {
     app.UseCors();
@@ -216,6 +236,12 @@ app.Logger.LogInformation(
     (int)tokenHandlerOptions.RefreshReplayLifetime.TotalMinutes);
 
 app.Run();
+
+// X-Azure-FDID holds a comma-separated list when requests pass through more than one Front Door profile.
+static bool IsFromFrontDoor(StringValues headerValues, string frontDoorId) =>
+    headerValues
+        .SelectMany(value => (value ?? string.Empty).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        .Any(value => string.Equals(value, frontDoorId, StringComparison.OrdinalIgnoreCase));
 
 static void EnsureConfig(IConfiguration config, string key)
 {

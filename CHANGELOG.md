@@ -4,6 +4,20 @@ All notable changes to DevBrain are tracked in this file. Versions follow [Seman
 
 ## [Unreleased]
 
+### Added
+
+- Added an opt-in `COSMOS_SERVERLESS` azd value (`cosmosServerless` Bicep parameter) that creates the Cosmos DB account in serverless mode. It defaults to `false`, so existing and new provisioned deployments are unchanged.
+- Added an optional `CUSTOM_DOMAIN_NAME` that sets the OAuth issuer, protected-resource URL, redirect URI, and `AllowedHosts` from a public host name, replacing the manual `main.bicep` edits the README previously described.
+- Added optional publishing through an existing Azure Front Door Standard/Premium profile (`FRONT_DOOR_PROFILE_NAME`, `FRONT_DOOR_RESOURCE_GROUP`, `FRONT_DOOR_SKU`), with a dedicated endpoint, route, managed-certificate custom domain, and custom-rule WAF policy. The WAF includes a path allow list, per-IP rate limits for the OAuth endpoints and overall traffic, and an optional country allow list (`FRONT_DOOR_ALLOWED_COUNTRIES`). With `DNS_ZONE_NAME`, provisioning also writes the CNAME and domain-validation TXT records into an existing Azure DNS zone.
+- Added an opt-in `FrontDoor:Id` origin check. When it's set, the server rejects requests that lack the matching `X-Azure-FDID` header, except `/healthz`, so the Container Apps host name can't bypass the Front Door WAF. Provisioning sets it automatically when Front Door is enabled.
+- Added `DEVBRAIN_PUBLIC_URL` and `DEVBRAIN_MCP_URL` provisioning outputs.
+
+### Fixed
+
+- Fixed first-time provisioning of a new environment, which stalled until the Container App operation expired. The Container App pulled from ACR with its system-assigned identity, which receives AcrPull only after the app exists, so the first revision could never start. Image pulls now use the user-assigned identity, which is granted AcrPull before the app is created.
+- Replaced the first-provision placeholder image with `mcr.microsoft.com/dotnet/samples:aspnetapp`. The previous placeholder listened on port 80, so it failed the template's port-8080 `/healthz` startup probe and the first revision never became healthy.
+- Fixed the README's Azure CLI app-role snippet, which wrapped the role in a nested array and cut it off at the default `ConvertTo-Json` depth, so `az ad app update --app-roles` failed.
+
 ## [2.0.0] — 2026-09-29
 
 DevBrain 2.0 replaces the Azure Functions host with a standalone ASP.NET Core host on Azure Container Apps. The MCP endpoint moves from `/runtime/webhooks/mcp` on the Function App to `/mcp` on the Container App. Existing documents carry over unchanged, and each client signs in once against the new endpoint. See "Upgrading from 1.x" in the README for the cutover and cleanup steps.
