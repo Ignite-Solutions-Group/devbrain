@@ -18,9 +18,9 @@ Deploy DevBrain once and every project you work on shares the same knowledge sto
 
 ```
 # Morning session — three projects, three tool calls
-GetDocument(key="state:current", project="acme-platform")
-GetDocument(key="state:current", project="devbrain")
-GetDocument(key="state:current", project="client-abc")
+GetDocument(key="acme-platform:state:current", project="acme-platform")
+GetDocument(key="devbrain:state:current", project="devbrain")
+GetDocument(key="client-abc:state:current", project="client-abc")
 ```
 
 Compare that to alternatives:
@@ -331,12 +331,14 @@ DevBrain is only as useful as the context your AI tools actually load. The recom
 
 At the start of every session, load project context from DevBrain:
 
-1. GetDocument(key="state:current", project="{your-project}")
-2. If a sprint is active: GetDocument(key="sprint:{sprint-name}", project="{your-project}")
+1. GetDocument(key="{your-project}:state:current", project="{your-project}")
+2. If a sprint is active: GetDocument(key="{your-project}:sprint:{sprint-name}", project="{your-project}")
 
 Before ending a session, write back any significant changes:
-- UpsertDocument key="state:current" if project state changed
-- UpsertDocument key="sprint:{name}" if sprint progress changed
+- UpsertDocument key="{your-project}:state:current" if project state changed
+- UpsertDocument key="{your-project}:sprint:{name}" if sprint progress changed
+
+Every key starts with the project name, and every call also passes the project.
 
 DevBrain is the canonical source of truth. Do not ask the user to upload
 files or paste context — read it directly from DevBrain.
@@ -387,7 +389,7 @@ Example:
 
 ```text
 PreviewEditDocument(
-  key="state:current",
+  key="devbrain:state:current",
   project="devbrain",
   oldText="Status: draft",
   newText="Status: in progress"
@@ -396,7 +398,7 @@ PreviewEditDocument(
 
 ```text
 ApplyEditDocument(
-  key="state:current",
+  key="devbrain:state:current",
   project="devbrain",
   oldText="Status: draft",
   newText="Status: in progress",
@@ -432,15 +434,18 @@ Pick Append when the doc grows over time. Pick Chunked when you already have the
 
 Documents are organized by key prefix. These conventions are recommended but not enforced:
 
-Keys use colon as the separator (e.g. `sprint:license-sync`). **Writes** (`UpsertDocument`, `AppendDocument`, `UpsertDocumentChunked`) reject keys containing `/` with a "did you mean" error suggesting the colon form. **Reads** (`GetDocument`, `ListDocuments`, `SearchDocuments`) and `DeleteDocument` continue to accept slash keys so legacy data and cleanup operations keep working.
+A key identifies one document across the whole store; `project` filters reads but isn't part of a document's identity. Start every project document's key with its project name (for example `acme-platform:state:current`), and still pass `project` on every call. Unprefixed keys belong to the `default` project, which holds general DevBrain material such as `ref:devbrain-usage`.
+
+Keys use colon as the separator (e.g. `acme-platform:sprint:license-sync`). **Writes** (`UpsertDocument`, `AppendDocument`, `UpsertDocumentChunked`) reject keys containing `/` with a "did you mean" error suggesting the colon form. **Reads** (`GetDocument`, `ListDocuments`, `SearchDocuments`) and `DeleteDocument` continue to accept slash keys so legacy data and cleanup operations keep working.
 
 | Prefix | Use |
 |--------|-----|
-| `sprint:{name}` | Sprint specs, e.g. `sprint:license-sync` |
-| `state:current` | Current project state document |
-| `arch:{name}` | Architecture docs |
-| `decision:{name}` | Architecture decision records |
-| `ref:{name}` | Reference material, infra constants |
+| `{project}:sprint:{name}` | Sprint specs, e.g. `acme-platform:sprint:license-sync` |
+| `{project}:state:current` | Current project state document |
+| `{project}:arch:{name}` | Architecture docs |
+| `{project}:decision:{name}` | Architecture decision records |
+| `{project}:ref:{name}` | Project reference material, infra constants |
+| `ref:{name}` | General DevBrain reference material in the `default` project |
 
 ## Local Development
 
