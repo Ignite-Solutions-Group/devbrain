@@ -159,4 +159,4 @@ Yes — fully. Cosmos DB is the backing store, not in-memory. Documents survive 
 Cosmos DB has a 2MB per-document limit. Typical sprint specs (15-30KB) and state documents (up to ~40KB) are well within this limit.
 
 ### Are documents versioned?
-No. UpsertDocument is full overwrite semantics — there is no history. The `updatedAt` field tracks the last write time but previous versions are not retained. Be deliberate about overwrites. Never patch — always do full rewrites of the current content.
+No. UpsertDocument is full overwrite semantics — there is no history. The `updatedAt` field tracks the last write time but previous versions are not retained, so be deliberate about overwrites. Use the narrowest write for the change: `PreviewEditDocument` / `ApplyEditDocument` for exact text edits, `AppendDocument` to add entries to a growing log (session history, decision logs), `EditTags` for tag-only changes, and `UpsertDocument` only when you mean to replace the whole document.
