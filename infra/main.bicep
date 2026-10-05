@@ -31,8 +31,10 @@ param oauthAccessTokenLifetimeMinutes string = ''
 @description('Optional rotated-refresh-token replay marker lifetime in whole minutes. Leave empty for the application default.')
 param oauthRefreshReplayLifetimeMinutes string = ''
 
+// The placeholder listens on 8080 and serves /healthz, so the first revision passes the same ingress
+// port and probes as DevBrain itself before azd deploys the real image.
 @description('Container image used when provisioning the Container App. azd replaces it with the built DevBrain image during deployment.')
-param containerAppImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+param containerAppImage string = 'mcr.microsoft.com/dotnet/samples:aspnetapp'
 
 @description('Minimum Container App replica count. Set to 1 or higher when interactive cold-start latency is important.')
 @minValue(0)
@@ -41,6 +43,36 @@ param containerAppMinReplicas int = 0
 @description('Maximum Container App replica count.')
 @minValue(1)
 param containerAppMaxReplicas int = 3
+
+@description('Create the Cosmos DB account in serverless (pay-per-request) mode instead of provisioned throughput. Useful when the subscription\'s one free-tier account is already taken. Applies only when the account is first created; Cosmos DB cannot switch an existing account to serverless.')
+param cosmosServerless bool = false
+
+// ─── Optional public host name and Azure Front Door ─────────────────────────
+
+@description('Optional public host name, for example devbrain.contoso.com. When set, OAuth URLs and the Entra redirect URI use it instead of the Container Apps host name.')
+param customDomainName string = ''
+
+@description('Optional existing Azure Front Door Standard/Premium profile to publish DevBrain through. Requires customDomainName. The app then rejects requests that did not come through this profile.')
+param frontDoorProfileName string = ''
+
+@description('Resource group of the Front Door profile. Defaults to this deployment\'s resource group.')
+param frontDoorResourceGroupName string = ''
+
+@description('SKU of the existing Front Door profile; the DevBrain WAF policy is created with the matching SKU.')
+@allowed([
+  'Standard_AzureFrontDoor'
+  'Premium_AzureFrontDoor'
+])
+param frontDoorSkuName string = 'Standard_AzureFrontDoor'
+
+@description('Optional Azure DNS zone that hosts customDomainName. When set with Front Door, the CNAME and domain-validation TXT records are created there.')
+param dnsZoneName string = ''
+
+@description('Resource group of the Azure DNS zone. Defaults to the Front Door resource group.')
+param dnsZoneResourceGroupName string = ''
+
+@description('Optional comma-separated two-letter country codes the Front Door WAF allows, for example "US,CA". Empty allows every country.')
+param frontDoorAllowedCountryCodes string = ''
 
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 
@@ -87,6 +119,7 @@ resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
   properties: {
     databaseAccountOfferType: 'Standard'
     enableFreeTier: false
+    capabilities: cosmosServerless ? [{ name: 'EnableServerless' }] : []
     enableAutomaticFailover: true
     minimalTlsVersion: 'Tls12'
     defaultIdentity: 'FirstPartyIdentity'
@@ -295,6 +328,44 @@ var containerAppName = 'ca-devbrain-${substring(resourceToken, 0, 6)}'
 var containerAppHostName = '${containerAppName}.${containerAppsEnvironment.properties.defaultDomain}'
 var containerAppBaseUrl = 'https://${containerAppHostName}'
 
+// Front Door forwards with the Container Apps host name as the Host header, so AllowedHosts keeps it
+// alongside the public name.
+var publicBaseUrl = empty(customDomainName) ? containerAppBaseUrl : 'https://${customDomainName}'
+var allowedHosts = empty(customDomainName) ? containerAppHostName : '${customDomainName};${containerAppHostName}'
+
+var useFrontDoor = !empty(frontDoorProfileName) && !empty(customDomainName)
+var frontDoorResourceGroup = empty(frontDoorResourceGroupName) ? resourceGroup().name : frontDoorResourceGroupName
+var useFrontDoorDns = useFrontDoor && !empty(dnsZoneName)
+var dnsZoneResourceGroup = empty(dnsZoneResourceGroupName) ? frontDoorResourceGroup : dnsZoneResourceGroupName
+var normalizedDnsZoneName = toLower(dnsZoneName)
+var normalizedCustomDomainName = toLower(customDomainName)
+
+module frontDoor 'modules/front-door.bicep' = if (useFrontDoor) {
+  name: 'devbrain-front-door-${substring(resourceToken, 0, 6)}'
+  scope: resourceGroup(frontDoorResourceGroup)
+  params: {
+    profileName: frontDoorProfileName
+    skuName: frontDoorSkuName
+    resourceToken: substring(resourceToken, 0, 6)
+    customDomainName: normalizedCustomDomainName
+    originHostName: containerAppHostName
+    dnsZoneId: useFrontDoorDns ? resourceId(subscription().subscriptionId, dnsZoneResourceGroup, 'Microsoft.Network/dnsZones', normalizedDnsZoneName) : ''
+    allowedCountryCodes: empty(frontDoorAllowedCountryCodes) ? [] : map(split(frontDoorAllowedCountryCodes, ','), code => toUpper(trim(code)))
+  }
+}
+
+module frontDoorDns 'modules/front-door-dns.bicep' = if (useFrontDoorDns) {
+  name: 'devbrain-front-door-dns-${substring(resourceToken, 0, 6)}'
+  scope: resourceGroup(dnsZoneResourceGroup)
+  params: {
+    dnsZoneName: normalizedDnsZoneName
+    // The custom domain must sit below the zone apex, for example devbrain.contoso.com in contoso.com.
+    recordName: useFrontDoorDns ? substring(normalizedCustomDomainName, 0, length(normalizedCustomDomainName) - length(normalizedDnsZoneName) - 1) : ''
+    endpointHostName: useFrontDoor ? frontDoor!.outputs.endpointHostName : ''
+    validationToken: useFrontDoor ? frontDoor!.outputs.customDomainValidationToken : ''
+  }
+}
+
 resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
   name: containerAppName
   location: location
@@ -314,7 +385,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
       registries: [
         {
           server: containerRegistry.properties.loginServer
-          identity: 'system'
+          identity: containerAppIdentity.id
         }
       ]
       ingress: {
@@ -323,8 +394,9 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
         targetPort: 8080
         transport: 'auto'
       }
-      // The public placeholder image keeps initial provisioning independent of ACR. The
-      // explicit registry identity lets azd switch to the private built image during deploy.
+      // The public placeholder image keeps initial provisioning independent of ACR. The registry uses
+      // the user-assigned identity because its AcrPull grant can exist before the app is created; a
+      // system-assigned identity only exists once the app does, which stalls the first provision.
       secrets: [
         {
           name: 'entra-client-secret'
@@ -350,7 +422,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           env: [
             { name: 'ASPNETCORE_HTTP_PORTS', value: '8080' }
             { name: 'AZURE_CLIENT_ID', value: containerAppIdentity.properties.clientId }
-            { name: 'AllowedHosts', value: containerAppHostName }
+            { name: 'AllowedHosts', value: allowedHosts }
             { name: 'CosmosDb__AccountEndpoint', value: cosmosAccount.properties.documentEndpoint }
             { name: 'CosmosDb__DatabaseName', value: 'devbrain' }
             { name: 'CosmosDb__ContainerName', value: 'documents' }
@@ -359,7 +431,8 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             // deployments keep their live sessions; changing it signs every client out.
             { name: 'CosmosDb__OAuthKeyPrefix', value: 'v2:' }
             { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: applicationInsights.properties.ConnectionString }
-            { name: 'OAuth__BaseUrl', value: containerAppBaseUrl }
+            { name: 'OAuth__BaseUrl', value: publicBaseUrl }
+            { name: 'FrontDoor__Id', value: useFrontDoor ? frontDoor!.outputs.frontDoorId : '' }
             { name: 'OAuth__EntraTenantId', value: entraTenantId }
             { name: 'OAuth__EntraClientId', value: entraClientId }
             { name: 'OAuth__EntraClientSecret', secretRef: 'entra-client-secret' }
@@ -428,6 +501,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
     }
   }
   dependsOn: [
+    containerAppIdentityAcrPullRole
     containerAppStorageBlobDataOwnerRole
     containerAppKeyVaultCryptoUserRole
     containerAppKeyVaultSecretsUserRole
@@ -449,6 +523,16 @@ resource containerAppAcrPullRole 'Microsoft.Authorization/roleAssignments@2022-0
   scope: containerRegistry
   properties: {
     principalId: containerApp.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+  }
+}
+
+resource containerAppIdentityAcrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(containerRegistry.id, containerAppIdentity.id, '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+  scope: containerRegistry
+  properties: {
+    principalId: containerAppIdentity.properties.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
   }
@@ -491,7 +575,11 @@ resource containerAppKeyVaultSecretsUserRole 'Microsoft.Authorization/roleAssign
 // ─── Outputs ─────────────────────────────────────────────────────────────────
 
 output AZURE_CONTAINER_APP_URL string = containerAppBaseUrl
-output OAUTH_REDIRECT_URI string = '${containerAppBaseUrl}/callback'
+output DEVBRAIN_PUBLIC_URL string = publicBaseUrl
+output DEVBRAIN_MCP_URL string = '${publicBaseUrl}/mcp'
+output OAUTH_REDIRECT_URI string = '${publicBaseUrl}/callback'
+output FRONT_DOOR_ENDPOINT_HOST_NAME string = useFrontDoor ? frontDoor!.outputs.endpointHostName : ''
+output FRONT_DOOR_DOMAIN_VALIDATION_TOKEN string = useFrontDoor ? frontDoor!.outputs.customDomainValidationToken : ''
 output AZURE_CONTAINER_REGISTRY_NAME string = containerRegistry.name
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = containerRegistry.properties.loginServer
 output AZURE_CONTAINER_APP_IDENTITY_PRINCIPAL_ID string = containerAppIdentity.properties.principalId

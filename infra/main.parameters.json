@@ -26,8 +26,32 @@
     "oauthRefreshReplayLifetimeMinutes": {
       "value": "${OAUTH_REFRESH_REPLAY_LIFETIME_MINUTES=}"
     },
+    "cosmosServerless": {
+      "value": "${COSMOS_SERVERLESS=false}"
+    },
+    "frontDoorSkuName": {
+      "value": "${FRONT_DOOR_SKU=Standard_AzureFrontDoor}"
+    },
+    "customDomainName": {
+      "value": "${CUSTOM_DOMAIN_NAME=}"
+    },
+    "frontDoorProfileName": {
+      "value": "${FRONT_DOOR_PROFILE_NAME=}"
+    },
+    "frontDoorResourceGroupName": {
+      "value": "${FRONT_DOOR_RESOURCE_GROUP=}"
+    },
+    "dnsZoneName": {
+      "value": "${DNS_ZONE_NAME=}"
+    },
+    "dnsZoneResourceGroupName": {
+      "value": "${DNS_ZONE_RESOURCE_GROUP=}"
+    },
+    "frontDoorAllowedCountryCodes": {
+      "value": "${FRONT_DOOR_ALLOWED_COUNTRIES=}"
+    },
     "containerAppImage": {
-      "value": "${SERVICE_SERVER_IMAGE_NAME=mcr.microsoft.com/azuredocs/containerapps-helloworld:latest}"
+      "value": "${SERVICE_SERVER_IMAGE_NAME=mcr.microsoft.com/dotnet/samples:aspnetapp}"
     }
   }
 }

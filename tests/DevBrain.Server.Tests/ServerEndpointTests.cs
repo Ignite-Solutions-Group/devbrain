@@ -21,6 +21,8 @@ namespace DevBrain.Server.Tests;
 
 public sealed class ServerEndpointTests : IClassFixture<DevBrainWebApplicationFactory>
 {
+    private const string FrontDoorId = "5f0c2a8e-1d3b-4c6a-9e7f-0a1b2c3d4e5f";
+
     private readonly HttpClient _client;
     private readonly DevBrainWebApplicationFactory _factory;
 
@@ -91,6 +93,50 @@ public sealed class ServerEndpointTests : IClassFixture<DevBrainWebApplicationFa
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("healthy", body!["status"]);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("22222222-2222-2222-2222-222222222222")]
+    public async Task FrontDoorCheck_RejectsRequestsWithoutThisProfilesId(string? frontDoorIdHeader)
+    {
+        await using var factory = _factory.WithWebHostBuilder(builder => builder.UseSetting("FrontDoor:Id", FrontDoorId));
+        using var client = factory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/.well-known/oauth-protected-resource");
+        if (frontDoorIdHeader is not null)
+        {
+            request.Headers.Add("X-Azure-FDID", frontDoorIdHeader);
+        }
+
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(FrontDoorId)]
+    [InlineData("33333333-3333-3333-3333-333333333333, " + FrontDoorId)]
+    public async Task FrontDoorCheck_AllowsRequestsStampedWithThisProfilesId(string frontDoorIdHeader)
+    {
+        await using var factory = _factory.WithWebHostBuilder(builder => builder.UseSetting("FrontDoor:Id", FrontDoorId));
+        using var client = factory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/.well-known/oauth-protected-resource");
+        request.Headers.Add("X-Azure-FDID", frontDoorIdHeader);
+
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task FrontDoorCheck_LeavesHealthzOpenForPlatformProbes()
+    {
+        await using var factory = _factory.WithWebHostBuilder(builder => builder.UseSetting("FrontDoor:Id", FrontDoorId));
+        using var client = factory.CreateClient();
+
+        using var response = await client.GetAsync("/healthz", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]
