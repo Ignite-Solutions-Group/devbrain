@@ -43,3 +43,7 @@ Thumbs.db
 
 # Serena local workspace metadata
 .serena/
+
+# Per-deployment agent instructions (each deployment points agents at its own
+# DevBrain instance), anchored to the repo root.
+/AGENTS.md
