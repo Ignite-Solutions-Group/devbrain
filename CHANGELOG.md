@@ -11,6 +11,7 @@ All notable changes to DevBrain are tracked in this file. Versions follow [Seman
 - Added optional publishing through an existing Azure Front Door Standard/Premium profile (`FRONT_DOOR_PROFILE_NAME`, `FRONT_DOOR_RESOURCE_GROUP`, `FRONT_DOOR_SKU`), with a dedicated endpoint, route, managed-certificate custom domain, and custom-rule WAF policy. The WAF includes a path allow list, per-IP rate limits for the OAuth endpoints and overall traffic, and an optional country allow list (`FRONT_DOOR_ALLOWED_COUNTRIES`). With `DNS_ZONE_NAME`, provisioning also writes the CNAME and domain-validation TXT records into an existing Azure DNS zone. The profile and the zone can each live in another subscription of the same tenant (`FRONT_DOOR_SUBSCRIPTION_ID`, `DNS_ZONE_SUBSCRIPTION_ID`).
 - Added an opt-in `FrontDoor:Id` origin check. When it's set, the server rejects requests that lack the matching `X-Azure-FDID` header, except `/healthz`, so the Container Apps host name can't bypass the Front Door WAF. Provisioning sets it automatically when Front Door is enabled.
 - Added `DEVBRAIN_PUBLIC_URL` and `DEVBRAIN_MCP_URL` provisioning outputs.
+- Documented that a Front Door origin response timeout shorter than a cold start (for example 30 seconds) can make the first request after a scale-to-zero idle period return `504`, and how to avoid it.
 
 ### Fixed
 
