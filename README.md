@@ -218,6 +218,15 @@ The WAF policy uses custom rules only, so it works on the Standard tier:
 
 With Front Door enabled, the app also sets `FrontDoor__Id` to the profile's ID and rejects any request without the matching `X-Azure-FDID` header. As a result, the `*.azurecontainerapps.io` host name can't be used to bypass the WAF. `/healthz` stays open for Container Apps health probes.
 
+Front Door returns `504` when the origin doesn't respond within the profile's origin response timeout. With the default of zero minimum replicas, the first request after an idle period waits for a container to start, which can take 30 seconds or more. If the profile's timeout is close to or shorter than that, the first call can fail while later calls succeed. Set the timeout to at least 60 seconds (the allowed range is 16–240), or set `containerAppMinReplicas` to `1` in `infra/main.bicep`. The timeout is a profile-wide setting that also applies to the profile's other sites, and the template doesn't change it. To check the current value and raise it:
+
+```powershell
+az afd profile show --subscription <subscription-id> --resource-group <front-door-resource-group> --profile-name <front-door-profile> --query originResponseTimeoutSeconds
+az afd profile update --subscription <subscription-id> --resource-group <front-door-resource-group> --profile-name <front-door-profile> --origin-response-timeout-seconds 60
+```
+
+A write that returned `504` might still have been applied. Before retrying an `AppendDocument`, which isn't idempotent, check the document with `GetDocumentMetadata` or `CompareDocument`.
+
 To use a custom domain without Front Door, set only `CUSTOM_DOMAIN_NAME` and [bind the domain to the Container App](https://learn.microsoft.com/azure/container-apps/custom-domains-managed-certificates) yourself.
 
 ## First Run
@@ -248,7 +257,7 @@ DevBrain 2.0 removes the Azure Functions host. On an existing 1.x environment:
 
 - **Client secret expiry.** When the Entra client secret expires, sign-ins and token refreshes fail. Before it expires, create a new secret and write it to the `entra-client-secret` Key Vault secret, either with `az keyvault secret set` or by setting `ENTRA_CLIENT_SECRET` and re-running `azd provision`. Container Apps picks up the new version within 30 minutes. To apply it immediately, restart the active revision with `az containerapp revision restart`.
 - **JWT signing secret rotation.** Replacing `jwt-signing-secret` invalidates every DevBrain access token already issued, so clients re-authenticate on their next call. It's the "sign everyone out" lever.
-- **Cold starts.** The template defaults to zero minimum replicas, so the first request after an idle period waits for a container to start. Set `containerAppMinReplicas` to `1` in `infra/main.bicep` if interactive latency matters more than idle cost.
+- **Cold starts.** The template defaults to zero minimum replicas, so the first request after an idle period waits for a container to start. Set `containerAppMinReplicas` to `1` in `infra/main.bicep` if interactive latency matters more than idle cost. Behind Front Door, keep the profile's origin response timeout longer than a cold start, or that first request can return `504` (see [Optional: custom domain and Azure Front Door](#optional-custom-domain-and-azure-front-door)).
 - **Cost profile.** The main fixed costs are Cosmos DB, which uses standard provisioned throughput by default, and the Basic Azure Container Registry. Container Apps compute scales to zero by default. Check the Cosmos throughput settings against your budget before a long-running trial.
 - **Serverless Cosmos DB.** If the subscription's one free-tier Cosmos account is already in use, run `azd env set COSMOS_SERVERLESS true` before the first `azd provision`. Cosmos DB then bills per request and per GB stored, which is usually far cheaper for a small team's knowledge store, at the cost of no throughput or latency guarantees. Cosmos DB fixes the capacity mode when it creates the account, so set this before the first provision.
 - **Tearing down a trial.** The Key Vault has purge protection on, so `azd down` leaves it soft-deleted for 90 days and its name can't be reused in that time. For another trial, create a new azd environment name (`azd env new`) rather than re-provisioning the old one.
