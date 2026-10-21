@@ -4,13 +4,22 @@ All notable changes to DevBrain are tracked in this file. Versions follow [Seman
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-10-20
+
+DevBrain 2.1.0 adds optional publishing through a custom domain and an existing Azure Front Door profile, an opt-in serverless Cosmos DB mode, and fixes for first-time provisioning. It also picks up the fixes for five .NET denial-of-service advisories in `System.Security.Cryptography.Xml` and `System.Security.Cryptography.Pkcs`; redeploy with `azd deploy` to get them. Every new option is off unless you set it.
+
+### Security
+
+- Updated `System.Security.Cryptography.Xml` from 10.0.12 to 10.0.13, which also resolves `System.Security.Cryptography.Pkcs` to 10.0.13. This fixes CVE-2026-96958, CVE-2026-96959, and CVE-2026-96960 in Xml, and CVE-2026-84008 and CVE-2026-70162 in Pkcs, all .NET denial-of-service vulnerabilities. On 10.0.12, `dotnet restore` now fails, because NuGet audit warnings are treated as errors.
+- The server doesn't ship its own copies of these assemblies. It loads them from the ASP.NET Core runtime in its `mcr.microsoft.com/dotnet/aspnet:10.0` base image, which has the fixes from runtime 10.0.13 (released 2026-10-13). An existing deployment gets them only when `azd deploy` rebuilds the image on that runtime.
+
 ### Added
 
 - Added an opt-in `COSMOS_SERVERLESS` azd value (`cosmosServerless` Bicep parameter) that creates the Cosmos DB account in serverless mode. It defaults to `false`, so existing and new provisioned deployments are unchanged.
 - Added an optional `CUSTOM_DOMAIN_NAME` that sets the OAuth issuer, protected-resource URL, redirect URI, and `AllowedHosts` from a public host name, replacing the manual `main.bicep` edits the README previously described.
 - Added optional publishing through an existing Azure Front Door Standard/Premium profile (`FRONT_DOOR_PROFILE_NAME`, `FRONT_DOOR_RESOURCE_GROUP`, `FRONT_DOOR_SKU`), with a dedicated endpoint, route, managed-certificate custom domain, and custom-rule WAF policy. The WAF includes a path allow list, per-IP rate limits for the OAuth endpoints and overall traffic, and an optional country allow list (`FRONT_DOOR_ALLOWED_COUNTRIES`). With `DNS_ZONE_NAME`, provisioning also writes the CNAME and domain-validation TXT records into an existing Azure DNS zone. The profile and the zone can each live in another subscription of the same tenant (`FRONT_DOOR_SUBSCRIPTION_ID`, `DNS_ZONE_SUBSCRIPTION_ID`).
 - Added an opt-in `FrontDoor:Id` origin check. When it's set, the server rejects requests that lack the matching `X-Azure-FDID` header, except `/healthz`, so the Container Apps host name can't bypass the Front Door WAF. Provisioning sets it automatically when Front Door is enabled.
-- Added `DEVBRAIN_PUBLIC_URL` and `DEVBRAIN_MCP_URL` provisioning outputs.
+- Added `DEVBRAIN_PUBLIC_URL`, `DEVBRAIN_MCP_URL`, `FRONT_DOOR_ENDPOINT_HOST_NAME`, and `FRONT_DOOR_DOMAIN_VALIDATION_TOKEN` provisioning outputs.
 - Documented that a Front Door origin response timeout shorter than a cold start (for example 30 seconds) can make the first request after a scale-to-zero idle period return `504`, and how to avoid it.
 
 ### Fixed
@@ -18,6 +27,19 @@ All notable changes to DevBrain are tracked in this file. Versions follow [Seman
 - Fixed first-time provisioning of a new environment, which stalled until the Container App operation expired. The Container App pulled from ACR with its system-assigned identity, which receives AcrPull only after the app exists, so the first revision could never start. Image pulls now use the user-assigned identity, which is granted AcrPull before the app is created.
 - Replaced the first-provision placeholder image with `mcr.microsoft.com/dotnet/samples:aspnetapp`. The previous placeholder listened on port 80, so it failed the template's port-8080 `/healthz` startup probe and the first revision never became healthy.
 - Fixed the README's Azure CLI app-role snippet, which wrapped the role in a nested array and cut it off at the default `ConvertTo-Json` depth, so `az ad app update --app-roles` failed.
+
+### Changed
+
+- Switched the README, the seed usage guide (`ref:devbrain-usage`), and `docs/project-init.md` to project-prefixed keys. A key identifies one document across the whole store, and `project` only filters reads, so the same unprefixed key used in two projects is one document that each project overwrites. Re-seed `ref:devbrain-usage` to pick up the updated guide.
+- Replaced the usage guide's outdated "Never patch — always do full rewrites" advice with the narrowest write for each kind of change.
+- Added a root-anchored `AGENTS.md` to `.gitignore`, so per-deployment agent instructions stay out of the repository.
+
+### Validation
+
+- `dotnet test --solution devbrain.slnx` passes 162 tests across `DevBrain.Core.Tests` and `DevBrain.Server.Tests`.
+- `dotnet list devbrain.slnx package --vulnerable --include-transitive` reports no vulnerable packages in any project. `--deprecated --include-transitive` flags only `Microsoft.Testing.Platform.MSBuild` 2.4.0, a test-project dependency marked legacy.
+- `az bicep build --file infra/main.bicep` succeeds.
+- A build of `main` from just before the version bump is deployed and serving the production environment behind Front Door, on the .NET 10.0.13 runtime. It still reports `serverInfo` 2.0.0.
 
 ## [2.0.0] — 2026-09-29
 
